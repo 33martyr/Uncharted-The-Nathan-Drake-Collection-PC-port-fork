@@ -1138,7 +1138,8 @@ void u2_import(bool silent, const std::string &reason = "") {
         if (!silent) tell("info", "The import is already running.");
         return;
     }
-    const std::string ps3 = text(g.config, "u2mp_ps3");
+    std::string ps3 = text(g.config, "u2mp_ps3");
+    if (ps3.empty()) ps3 = text(g.config, "u3mp_ps3_u2");   // the folder chosen for Uncharted 3's import (the page shows it)
     if (ps3.empty()) {
         if (!silent) tell("info", "Choose your PS3 Uncharted 2 folder first.");
         return;
@@ -1153,6 +1154,8 @@ void u2_import(bool silent, const std::string &reason = "") {
     std::vector<std::string> cmd = {exe, "--ps4", game_dir(), "--ps3", ps3, "--out", out};
     const std::string data = u2_data_folder();   // GOTY data only: the game data folder, no map pack folder
     if (!data.empty()) { cmd.push_back("--ps3-data"); cmd.push_back(data); }
+    const std::string elf = text(g.config, "u2mp_ps3_elf");   // else the import looks for USRDIR/EBOOT.elf
+    if (!elf.empty()) { cmd.push_back("--ps3-elf"); cmd.push_back(elf); }
     if (silent) cmd.push_back("--update");
     std::string error;
     HANDLE proc = spawn_logged(cmd, join(join(g.root, "u2mp"), "bin"), join(out, "launcher-run.log"), false, error);
@@ -2118,6 +2121,13 @@ void call(const std::string &name, const Value *value) {
             if (!text(&a).empty()) change_config("u2mp_ps3_data", a);
         });
     else if (name == "u2mp_data_clear") change_config("u2mp_ps3_data", Value::text(""));
+    else if (name == "u2mp_ps3_elf_choose") {
+        Value types = array();
+        types.items = {pair("Decrypted PS3 executable", "*.elf"), pair("All files", "*.*")};
+        ask_path("open", "Pick the decrypted EBOOT.elf (Uncharted 2 GOTY)", "", types, [](const Value &a) {
+            if (!text(&a).empty()) change_config("u2mp_ps3_elf", a);
+        });
+    } else if (name == "u2mp_ps3_elf_clear") change_config("u2mp_ps3_elf", Value::text(""));
     else if (name == "u2mp_dir_change") {
         if (u2_running()) tell("info", "The import is running: change the folder when it has finished.");
         else

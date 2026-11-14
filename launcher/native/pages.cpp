@@ -2050,32 +2050,51 @@ Value page_u2mp(const State &state) {
     const Value &s = st && st->is_object() ? *st : none;
     const std::string status = str_or(s.get("status"), "");
     const bool running = mp.get("running") && mp.get("running")->truthy();
+    const bool imported = status == "imported" || status == "partial";
 
-    std::vector<Value> game;
-    game.push_back(row(p + "row:ps3", "PS3 Uncharted 2 folder", "Your PS3 Uncharted 2 folder (the one with USRDIR, e.g. NPUA80698).",
-                       buttons_box(p, "ps3", {{"choose", "Choose"}, {"clear", "Clear"}})));
+    // the same steps as Uncharted 3's page (page_u3mp), for Uncharted 2's import
+    std::vector<Value> setup;
+    setup.push_back(row(p + "row:ps3", "1. Choose your PS3 Uncharted 2 folder",
+                        "Your Game of the Year copy (e.g. NPUA80698): the folder with USRDIR, or USRDIR itself.",
+                        buttons_box(p, "ps3", {{"choose", "Choose folder"}, {"clear", "Clear"}})));
     std::string ps3 = config_set(state, "u2mp_ps3");
     if (ps3.empty()) ps3 = config_set(state, "u3mp_ps3_u2");   // the folder chosen for Uncharted 3's import
-    game.push_back(label(p + "line:ps3", ps3.empty() ? "None chosen yet." : ps3, DIM, CARD, 9));
-    game.push_back(row(p + "row:data", "RPCS3 game data folder",
-                       "RPCS3's dev_hdd0/game folder (start the game once in RPCS3 first). Found by itself when your "
-                       "game folder is inside it.",
-                       buttons_box(p, "data", {{"choose", "Choose"}, {"clear", "Clear"}})));
+    setup.push_back(label(p + "line:ps3", ps3.empty() ? "None chosen yet." : ps3, DIM, CARD, 9));
+    setup.push_back(row(p + "row:data", "1b. RPCS3's game data folder",
+                        "RPCS3's dev_hdd0/game: it holds the game data Uncharted 2 downloads when it goes online "
+                        "(NPUA80698DATA2). Found by itself when your game folder is inside it.",
+                        buttons_box(p, "data", {{"choose", "Choose folder"}, {"clear", "Clear"}})));
     const std::string found = mp.get("found") ? text_of(*mp.get("found")) : "";
-    game.push_back(label(p + "line:data",
-                         found.empty() ? "Not found: start Uncharted 2 GOTY once in RPCS3, then choose RPCS3's dev_hdd0/game folder."
-                                       : found + (config_set(state, "u2mp_ps3_data").empty() ? "  (found by itself)" : ""),
-                         DIM, CARD, 9));
-
-    std::vector<Value> storage;
-    storage.push_back(row(p + "row:dir", "Multiplayer data folder",
-                          "The U2 Multiplayer folder: the converted files (about 400 MB). Change picks the folder it goes in.",
-                          buttons_box(p, "dir", {{"change", "Change"}, {"open", "Open"}})));
-    storage.push_back(label(p + "line:dir", mp.get("dir") ? text_of(*mp.get("dir")) : "", DIM, CARD, 9));
-
-    std::vector<Value> import;
-    import.push_back(import_box(p, mp, status == "imported" || status == "partial" || status == "failed" || status == "running"));
-    import.push_back(progress_bar(p + "bar", mp));
+    setup.push_back(label(p + "line:data",
+                          found.empty() ? "Not found: start Uncharted 2 GOTY once in RPCS3 and enter multiplayer, then choose "
+                                          "RPCS3's dev_hdd0/game folder."
+                                        : found + (config_set(state, "u2mp_ps3_data").empty() ? "  (found by itself)" : ""),
+                          DIM, CARD, 9));
+    // 1c: the community server DNS (config u3mp_dns: one setting for both games and RPCN online play)
+    const std::string dns = config_set(state, "u3mp_dns");
+    setup.push_back(row(p + "row:dns", "1c. Enter the community server DNS",
+                        "Its IPv4 address (the same box as on Uncharted 3's page and under RPCN online play). Online "
+                        "play uses it.",
+                        entry_well(p, "dns", dns)));
+    const std::string dns_clean = strip_spaces(dns);
+    setup.push_back(label(p + "line:dns",
+                          dns_clean.empty() ? "Not set: needed for online play."
+                          : looks_ipv4(dns_clean) ? "Set."
+                                                  : "Not an IPv4 address (four numbers with dots, e.g. 10.0.0.1).",
+                          DIM, CARD, 9));
+    setup.push_back(row(p + "row:ps3_elf", "2. Choose the decrypted EBOOT",
+                        "Required: the decrypted EBOOT.elf of your own copy of the game.",
+                        buttons_box(p, "ps3_elf", {{"choose", "Choose file"}, {"clear", "Clear"}})));
+    const std::string elf = config_set(state, "u2mp_ps3_elf");
+    setup.push_back(label(p + "line:ps3_elf", elf.empty() ? "Not chosen: looked for as EBOOT.elf in your PS3 folder's USRDIR." : elf,
+                          DIM, CARD, 9));
+    setup.push_back(row(p + "row:dir", "3. Choose where the files go",
+                        "The U2 Multiplayer folder: the converted files (about 400 MB).",
+                        buttons_box(p, "dir", {{"change", "Change"}, {"open", "Open"}})));
+    setup.push_back(label(p + "line:dir", mp.get("dir") ? text_of(*mp.get("dir")) : "", DIM, CARD, 9));
+    setup.push_back(bold_label(p + "import_title", "4. Import", TEXT));
+    setup.push_back(import_box(p, mp, imported || status == "failed" || status == "running"));
+    setup.push_back(progress_bar(p + "bar", mp));
     std::string text;
     const char *colour;
     const Value *failed = s.get("failed");
@@ -2101,16 +2120,17 @@ Value page_u2mp(const State &state) {
         text = "Not imported.";
         colour = MUTED;
     }
-    import.push_back(bold_label(p + "status", text, colour));
-    import.push_back(label(p + "note", "Runs in the background, even while you play.", DIM, CARD, 9));
+    if (!imported && !running) text += " Uncharted 2 starts without multiplayer until then.";
+    setup.push_back(bold_label(p + "status", text, colour));
+    setup.push_back(label(p + "note", "Takes a few minutes and keeps running when the launcher is closed. After a launcher "
+                                      "update only what changed is redone.", DIM, CARD, 9));
 
     Value page = array();
-    page.items.push_back(checklist(p, {{"PS3 folder", !ps3.empty()}, {"RPCS3 game data", !found.empty()},
-                                       {"Imported", status == "imported" || status == "partial"}},
+    page.items.push_back(checklist(p, {{"PS3 folder", !ps3.empty()}, {"Game data", !found.empty()}, {"Imported", imported}},
                                    "then sign in under RPCN online play"));
-    page.items.push_back(section(p + "game", "Your PS3 game", with_separators(std::move(game))));
-    page.items.push_back(section(p + "storage", "Storage", with_separators(std::move(storage))));
-    page.items.push_back(section(p + "import", "Import", with_separators(std::move(import))));
+    Value set_up = section(p + "setup", "Set up multiplayer", with_separators(std::move(setup)));
+    set_up.set("note", Value::text("New here? Do these four steps in order."));
+    page.items.push_back(std::move(set_up));
     return page;
 }
 
@@ -2128,7 +2148,7 @@ bool act_mp(const char *page, const std::vector<std::string> &buttons, const std
         changes.call.set("name", Value::text(name));
         return true;
     }
-    if (key == "field:dns" && prefix == "u3mp_") {   // step 1b: every edit is saved (the online section follows it)
+    if (key == "field:dns") {   // U3 step 1b / U2 step 1c, one setting: every edit is saved (the online section follows it)
         if (kind == "entry") changes.config.set("u3mp_dns", Value::text(value.kind == Value::String ? value.s : ""));
         return kind == "entry" || kind == "enter";
     }
@@ -2143,7 +2163,8 @@ bool act_mp(const char *page, const std::vector<std::string> &buttons, const std
 
 const std::vector<std::string> U3MP_BUTTONS = {"ps3_u3:add", "ps3_u3:clear", "ps3_elf:choose", "ps3_elf:clear",
                                                "data:change", "data:open", "import", "cancel", "log"};
-const std::vector<std::string> U2MP_BUTTONS = {"ps3:choose", "ps3:clear", "data:choose", "data:clear", "dir:change", "dir:open",
+const std::vector<std::string> U2MP_BUTTONS = {"ps3:choose", "ps3:clear", "data:choose", "data:clear", "ps3_elf:choose", "ps3_elf:clear",
+                                               "dir:change", "dir:open",
                                                "import", "cancel", "log"};
 
 // ------------------------------------------------------------------------------------------------ the regrouped tabs
