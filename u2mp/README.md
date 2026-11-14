@@ -40,10 +40,11 @@ the game yet**; the host unit tests pass.
 
 ## How it runs
 
-- Launcher, Multiplayer tab while Uncharted 2 is chosen: "Multiplayer in the Uncharted 2 menu" (on by
-  default), "Your name", "Join a host" (empty: this PC hosts on UDP port 27210). `u2mp_env` makes the
-  menu overlay into `analysis/uncharted-user/u2mp/overlay` and sets `UNCHARTED_U2MP_OVERLAY`,
-  `UNCHARTED_U2MP=1`, `UNCHARTED_U2MP_NAME`, `UNCHARTED_U2MP_JOIN`.
+- Launcher, Multiplayer tab while Uncharted 2 is chosen: the import (PS3 folder, RPCS3 game data, IMPORT) writes the
+  "U2 Multiplayer" folder, laid out like "U3 Multiplayer" and by default next to it: `state.json`, `import.log`,
+  `image/` (the menu overlay), `recipe/work` (the converted files), `recipe/scratch`, `recipe/_recipe`, `tools/`.
+  Once an import has finished, Uncharted 2 starts with multiplayer: the launcher makes the menu overlay into
+  `image/` and sets `UNCHARTED_U2MP_OVERLAY` (image; recipe/work) and `UNCHARTED_U2MP=1`.
 - `tools/probe_uncharted.py` lays the overlay over /app0 for Uncharted 2; the runtime calls
   `u2mp_install` after linking the image, before protecting it.
 - In game: Multiplayer starts the party (host, or join the address). The party leader picks

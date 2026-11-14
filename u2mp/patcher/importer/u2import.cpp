@@ -12,8 +12,13 @@
 //   --ps3-dlc  folder with dlc-map1/2.psarc and dlc-patch*.psarc; without it the map packs (groups C, D) are skipped
 //   --ps3-data the PS3 game-data folder (RPCS3 dev_hdd0/game or a <id>DATA2 folder): net-patch9.bin and the server's
 //              map spawn paks
-//   --out      the overlay: <out>/u2data/build/main/... (only converted files and the registries), <out>/state.json,
-//              <out>/import.log, <out>/work (caches, removable)
+//   --out      the "U2 Multiplayer" folder, laid out like Uncharted 3's "U3 Multiplayer":
+//                <out>/state.json, <out>/import.log
+//                <out>/recipe/work/u2data/build/main/...  the overlay: only converted files and the registries
+//                <out>/recipe/scratch                     caches (removable)
+//                <out>/recipe/_recipe                     the import list and the importer fingerprint of the last run
+//                <out>/image                              the menu overlay (u2import --overlay, made by the launcher)
+//                <out>/tools                              tool files of this import
 //
 // Rule: what the PS4 game has (skin, map, picture, sound ...) stays the PS4 one; only what it lacks is imported. Every
 // row of u2mp/docs/import-list.tsv (group, key, PS3 source, size, SHA-1) is checked against the PS4 game first; PS3
@@ -339,8 +344,9 @@ class Importer {
 public:
     explicit Importer(const Args &a) : a(a) {
         out = fs::absolute(P(a.out));
-        main = out / P(OUT_MAIN);
-        work = out / "work";
+        files = out / "recipe" / "work";   // the converted files (the game's overlay folder)
+        main = files / P(OUT_MAIN);
+        work = out / "recipe" / "scratch";
         state_file = out / "state.json";
         if (auto s = try_json(state_file); s && s->is_object()) state = *s;
         else state = Value::object();
@@ -351,7 +357,7 @@ public:
 
 private:
     Args a;
-    fs::path out, main, work, state_file;
+    fs::path out, files, main, work, state_file;
     Value state;
     std::string prev_status;
     std::unique_ptr<PS3> ps3;
@@ -417,7 +423,7 @@ private:
         if (starts(k, "actor27/mp-hero") && text_of(it->get("skin")) != SKIN_VERSION) return false;
         if (starts(k, "actor27/") && text_of(it->get("actor")) != ACTOR_VERSION) return false;
         if (text_of(it->get("status")) != "ok") return false;
-        const fs::path o = out / P(text_of(it->get("out")));
+        const fs::path o = files / P(text_of(it->get("out")));
         const Value *sz = it->get("size");
         return isfile(o) && sz && sz->kind == Value::Int && fsize(o) == sz->i;
     }
@@ -431,7 +437,7 @@ private:
         const std::string k = lower(key);
         if (starts(k, "actor27/mp-hero")) it.set("skin", str(SKIN_VERSION));
         if (starts(k, "actor27/")) it.set("actor", str(ACTOR_VERSION));
-        it.set("size", num(fsize(out / P(o))));
+        it.set("size", num(fsize(files / P(o))));
     }
 
     // (entry, bytes) of the PS3 file of a row, checked by SHA-1; throws std::out_of_range with the reason. A row
@@ -568,7 +574,9 @@ private:
 
 int Importer::run() {
     std::error_code ec;
-    fs::create_directories(out, ec);
+    // the folders of a "U2 Multiplayer" folder, named as in "U3 Multiplayer" (image: the launcher's menu overlay)
+    for (const fs::path &d : {out / "image", out / "tools", out / "recipe" / "_recipe", work, files})
+        fs::create_directories(d, ec);
     logf = _wfopen((out / "import.log").wstring().c_str(), L"ab");
     lg("=== u2mp import " + now_text() + " (converter " + CONV_VERSION + ")");
     state.set("status", str("running"));
@@ -766,7 +774,7 @@ bool Importer::step_outputs_ok(const std::string &sid) {
     if (sid != "import-list") return true;
     for (const auto &[k, it] : items().fields)
         if (text_of(it.get("status")) == "ok" && !text_of(it.get("out")).empty()) {
-            const fs::path p = out / P(text_of(it.get("out")));
+            const fs::path p = files / P(text_of(it.get("out")));
             const Value *sz = it.get("size");
             if (!isfile(p) || !sz || fsize(p) != sz->i) return false;
         }
@@ -1063,7 +1071,7 @@ void Importer::registries() {
         if (!starts(k, "pak22/") || !ends(k, "-pak-ingame10.pak")) continue;
         const std::string level = k.substr(6, k.size() - 6 - std::string("-ingame10.pak").size());
         const std::string st = text_of(it.get("status"));
-        if ((st == "ok" || st == "ps4") && (st == "ps4" || isfile(out / P(text_of(it.get("out"))))))
+        if ((st == "ok" || st == "ps4") && (st == "ps4" || isfile(files / P(text_of(it.get("out"))))))
             lt.emplace(level, "level-id " + level + "\npackage " + level + "-ingame\n");
     }
     const std::string net_u2mp = std::string(NETIMG_OUT_NAME).substr(0, std::string(NETIMG_OUT_NAME).size() - 4);
@@ -1200,6 +1208,18 @@ int Importer::finish(const std::string &status, std::vector<std::pair<std::strin
     // an automatic update (--update) that failed is not started again at every launcher start for the same import version
     if (status == "failed" && a.update) state.set("update_failed_for", str(shipped_id_text()));
     else if (status == "imported" || status == "partial") state.remove("update_failed_for");
+    // recipe/_recipe: the import list this import used and the importer's fingerprint (state.json recipe_id)
+    if (status == "imported" || status == "partial") {
+        try {
+            const fs::path r = out / "recipe" / "_recipe";
+            std::error_code ec;
+            fs::create_directories(r, ec);
+            write_text(r / "import-list.tsv", read_text(P(a.list)));
+            write_text(r / "recipe-id.txt", text_of(state.get("recipe_id")) + "\n");
+        } catch (const std::exception &e) {
+            lg(std::string("recipe/_recipe not written: ") + e.what());
+        }
+    }
     sha1_memo_save(work);
     save();
     event(obj({{"phase", str("done")}, {"status", str(status)}, {"error", str(text_of(state.get("error")))}}));

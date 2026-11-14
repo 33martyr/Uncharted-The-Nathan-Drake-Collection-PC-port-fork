@@ -1061,7 +1061,14 @@ bool u2_confirm_play();
 
 // ------------------------------------------------------------------------------------------------ Uncharted 2 multiplayer
 
-std::string u2_dir() { return join(join(g.user_dir, "u2mp"), "import"); }
+// the "U2 Multiplayer" folder (laid out like "U3 Multiplayer": state.json, import.log, image, recipe, tools): the
+// chosen one, else next to Uncharted 3's. The player's own U2 files (progression, cinema) stay in the user folder.
+std::string u2_dir() {
+    const std::string chosen = text(g.config, "u2mp_data");
+    return as_path(!chosen.empty() ? chosen : join(parent_of(u3_data()), "U2 Multiplayer"));
+}
+// the converted files the game lays over its own (recipe/work/u2data/...)
+std::string u2_files() { return join(join(u2_dir(), "recipe"), "work"); }
 Value u2_state() { return read_json(join(u2_dir(), "state.json")); }
 bool u2_running() {
     if (process_running(g.u2.proc)) return true;
@@ -1685,7 +1692,7 @@ void u2_env(std::vector<std::pair<std::string, Value>> &env, const std::string &
                           "UNCHARTED_U2MP_RELAY", "UNCHARTED_U2MP_ONLINE_DLL", "UNCHARTED_U2MP_ONLINE_EXE"})
         env.push_back({k, Value::null()});
     if (overlay.empty()) return;
-    env.push_back({"UNCHARTED_U2MP_OVERLAY", Value::text(overlay + ";" + u2_dir())});
+    env.push_back({"UNCHARTED_U2MP_OVERLAY", Value::text(overlay + ";" + u2_files())});
     env.push_back({"UNCHARTED_U2MP", Value::text("1")});
     env.push_back({"UNCHARTED_U2MP_NAME", Value::text("Drake")});
     const std::string online_exe = join(join(g.u3mp_dir, "online"), "u2_online.exe");   // Uncharted 2 online, a separate program
@@ -1697,13 +1704,13 @@ void u2_env(std::vector<std::pair<std::string, Value>> &env, const std::string &
 bool u2_usable() {
     const Value s = u2_state();
     const std::string status = text(s, "status");
-    return (status == "imported" || status == "partial") && is_dir(join(u2_dir(), "u2data")) && !u2_running();
+    return (status == "imported" || status == "partial") && is_dir(join(u2_files(), "u2data")) && !u2_running();
 }
 
 // the overlay folder for Uncharted 2's menu (u2import --overlay builds it from the player's game; "" when it can't)
 std::string build_u2_overlay(const std::string &game, const std::string &update) {
     const std::string bin = join(join(g.root, "u2mp"), "bin");
-    std::vector<std::string> cmd = {join(bin, "u2import.exe"), "--overlay", game, join(join(g.user_dir, "u2mp"), "overlay")};
+    std::vector<std::string> cmd = {join(bin, "u2import.exe"), "--overlay", game, join(u2_dir(), "image")};
     if (!update.empty()) cmd.insert(cmd.end(), {"--update", update});
     auto r = run(cmd, 600000, bin);
     if (r.first != 0) return "";
@@ -2111,7 +2118,13 @@ void call(const std::string &name, const Value *value) {
             if (!text(&a).empty()) change_config("u2mp_ps3_data", a);
         });
     else if (name == "u2mp_data_clear") change_config("u2mp_ps3_data", Value::text(""));
-    else if (name == "u2mp_dir_open") action("open_folder", Value::text(u2_dir()));
+    else if (name == "u2mp_dir_change") {
+        if (u2_running()) tell("info", "The import is running: change the folder when it has finished.");
+        else
+            ask_path("directory", "Pick the folder for the Uncharted 2 multiplayer files (about 400 MB)", "", array(), [](const Value &a) {
+                if (!text(&a).empty()) change_config("u2mp_data", Value::text(join(as_path(text(&a)), "U2 Multiplayer")));
+            });
+    } else if (name == "u2mp_dir_open") action("open_folder", Value::text(u2_dir()));
     else if (name == "u2mp_import") u2_import(false);
     else if (name == "u2mp_cancel") u2_cancel();
     else if (name == "u2mp_log") action("open_folder", Value::text(join(u2_dir(), "import.log")));

@@ -43,10 +43,17 @@ u2import --psarc list <file.psarc>   |   u2import --psarc extractall <file.psarc
   (`the-fort-multi.txt`: the GOTY copy differs only in CRLF line ends). Two inputs still come from `dlc-patch7`
   because no GOTY file has them: see "Known gaps" 10.
 
-* Output: `<out>/u2data/build/main/...`, which holds only the converted files plus `pak22_ps4.txt` and
-  `sound1/config/ps4/banks.txt` when something was added to them. The run also writes `<out>/state.json` (per
-  item: status, source, output, SHA-1 of the input, converter version), `<out>/import.log` and `<out>/work/`
-  (caches: extracted PS3 paks, the retail material survey, level plans; it can be deleted).
+* Output: `<out>` is the "U2 Multiplayer" folder, laid out like Uncharted 3's "U3 Multiplayer" (the launcher puts it
+  next to that one unless the player chooses another place):
+  * `recipe/work/u2data/build/main/...`: only the converted files plus `pak22_ps4.txt` and
+    `sound1/config/ps4/banks.txt` when something was added to them (the folder the game lays over /app0);
+  * `state.json` (per item: status, source, output relative to `recipe/work`, SHA-1 of the input, converter
+    version) and `import.log`;
+  * `recipe/scratch/` (caches: extracted PS3 paks, the retail material survey, level plans, the SHA-1 memo; it can
+    be deleted);
+  * `recipe/_recipe/`: the import list and the importer fingerprint of the last finished import;
+  * `image/`: the menu overlay (`u2import --overlay`, made by the launcher before each start);
+  * `tools/`: tool files of the import.
 * Progress: `@U2MP {json}` lines (`phase` item/done).
 * Resumable: an item whose input SHA-1, converter version (`CONV_VERSION`) and output size are unchanged is
   skipped. Failed and unsupported items are tried again on every run.
@@ -55,7 +62,7 @@ u2import --psarc list <file.psarc>   |   u2import --psarc extractall <file.psarc
 * Needs ffmpeg for sound banks with MP3 samples (`--ffmpeg`, the package's `u3mp/bin`, msys64, PATH) and GNU objdump
   for the Havok class tables (`--objdump`, `u3mp/bin`, msys64, PATH). Nothing else: no Python.
 * `--validate` re-runs the converters on files both platforms have and compares the results with retail PS4
-  (`<out>/work/validate/validation.json` and `state.json`).
+  (`<out>/recipe/scratch/validate/validation.json` and `state.json`).
 
 Item statuses in `state.json`: `ok` (converted and installed), `ps4` (the PS4 game has it), `skipped`
 (not needed: language without a PS4 counterpart, music the PS4 settings do not use, group F), `missing`

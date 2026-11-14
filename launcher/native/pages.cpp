@@ -2068,8 +2068,9 @@ Value page_u2mp(const State &state) {
                          DIM, CARD, 9));
 
     std::vector<Value> storage;
-    storage.push_back(row(p + "row:dir", "Multiplayer data folder", "Where the imported files go.",
-                          buttons_box(p, "dir", {{"open", "Open"}})));
+    storage.push_back(row(p + "row:dir", "Multiplayer data folder",
+                          "The U2 Multiplayer folder: the converted files (about 400 MB). Change picks the folder it goes in.",
+                          buttons_box(p, "dir", {{"change", "Change"}, {"open", "Open"}})));
     storage.push_back(label(p + "line:dir", mp.get("dir") ? text_of(*mp.get("dir")) : "", DIM, CARD, 9));
 
     std::vector<Value> import;
@@ -2142,7 +2143,7 @@ bool act_mp(const char *page, const std::vector<std::string> &buttons, const std
 
 const std::vector<std::string> U3MP_BUTTONS = {"ps3_u3:add", "ps3_u3:clear", "ps3_elf:choose", "ps3_elf:clear",
                                                "data:change", "data:open", "import", "cancel", "log"};
-const std::vector<std::string> U2MP_BUTTONS = {"ps3:choose", "ps3:clear", "data:choose", "data:clear", "dir:open",
+const std::vector<std::string> U2MP_BUTTONS = {"ps3:choose", "ps3:clear", "data:choose", "data:clear", "dir:change", "dir:open",
                                                "import", "cancel", "log"};
 
 // ------------------------------------------------------------------------------------------------ the regrouped tabs
