@@ -271,6 +271,9 @@ if (WIN32)
     target_compile_definitions(videodec2-test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_include_directories(videodec2-test PRIVATE shim shadps4)  # shim headers ahead of shadPS4's
     target_link_libraries(videodec2-test PRIVATE PkgConfig::FFMPEG Boost::headers)  # FFmpeg decodes the frames
+    # u3fix: the PS3 improved tonemap curve (src/u3fix/tonemap_curve.cpp)
+    add_executable(u3-tonemap-test EXCLUDE_FROM_ALL ../tests/test_u3_tonemap_curve.cpp ${GOW3_U3FIX})
+    target_compile_options(u3-tonemap-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     add_executable(shared-handles-test EXCLUDE_FROM_ALL ../tests/test_shared_handles.cpp)
     target_compile_options(shared-handles-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_libraries(shared-handles-test PRIVATE -pthread)

@@ -17,5 +17,8 @@ bool jump_to(unsigned char *image, uint64_t at, unsigned length, const unsigned 
 
 bool raise_net_process_pool(unsigned char *image, uint64_t size);
 bool install_particle_jobs_wait(unsigned char *image, uint64_t size);
+bool install_improved_tonemap_curve(unsigned char *image, uint64_t size);
+// the PS3 improved tonemap curve: rewrites the tonemap constants when the render settings ask for it (tonemap_curve.cpp)
+bool improved_tonemap_curve(float *constants, const unsigned char *settings, bool t1_curve);
 
 }  // namespace u3fix

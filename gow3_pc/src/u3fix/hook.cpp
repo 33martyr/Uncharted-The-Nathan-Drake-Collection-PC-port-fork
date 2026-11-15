@@ -77,5 +77,6 @@ extern "C" int u3fix_install(unsigned char *image, uint64_t size) {
     int applied = 0;
     applied += u3fix::raise_net_process_pool(image, size) ? 1 : 0;
     applied += u3fix::install_particle_jobs_wait(image, size) ? 1 : 0;
+    applied += u3fix::install_improved_tonemap_curve(image, size) ? 1 : 0;
     return applied;
 }

@@ -308,7 +308,15 @@ bool MultiwaveLdsBarriers(u64 pgm_hash) {
             // auto-exposure row sums (aec539f0, 256 threads) reduce in LDS with no barriers in the
             // last six steps (one GCN wave in lockstep); on 32-lane GPUs they raced and the sums
             // came out 2.5x too small (a laptop: title 205 -> 166 with barriers, = AMD 780M).
-            return std::vector<u64>{0x1c957b01ULL, 0x809864d3ULL, 0xaec539f0ULL};
+            // gow3 15 Nov 2026 (Museum / Village washed out): the two later steps of the same
+            // auto exposure end in the same barrier-less tail and were left out: 7095d6c2 (256
+            // threads) adds the row sums up to the frame's mean luminance, 4f81a8f (128 threads)
+            // averages the last N means (tonemap-luminance-filter-size) and turns them into the
+            // exposure, EV = set-point - (6 + log2 mean), clamped to the level's light range. A
+            // mean that comes out too small raises the EV towards the top of the range, which
+            // shows most in the levels with the highest ceilings (Museum, Village: 4.875).
+            return std::vector<u64>{0x1c957b01ULL, 0x809864d3ULL, 0xaec539f0ULL, 0x7095d6c2ULL,
+                                    0x04f81a8fULL};
         }
         if (env[0] == '1' && env[1] == 0) {
             return std::vector<u64>{~0ULL};
