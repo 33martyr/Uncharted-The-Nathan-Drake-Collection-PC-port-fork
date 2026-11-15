@@ -38,8 +38,7 @@ changed.
   repository's releases.
 * **Release**: write `tools/release-notes/vX.Y.Z.md`, set `tools/VERSION` to X.Y.Z (higher than every earlier
   release: 0.9.0 and up, above upstream 0.8.3), commit, `git tag -a vX.Y.Z -m "Release X.Y.Z"`, and push `main`
-  and the tag. `.github/workflows/build-windows.yml` builds the package (with `tools/package_windows.sh`, which
-  also compiles `sound-banks/native/vagenc.dll` and checks it byte-identical) and publishes the release.
+  and the tag. `.github/workflows/build-windows.yml` builds the package with `tools/package_windows.sh` and publishes the release.
   Launchers of earlier versions then offer it under UPDATE.
 
 ## Notes

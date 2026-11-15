@@ -143,8 +143,8 @@ option_defaults -> option_defaults_2. `vox*.bin`: apply_vo -> coop_vox.
 
 * **Fresh import 1.8.0 (2026-11-06, through u3mp_import.py like a player, 12 threads, 10 workers): 56 min** for the
   recipe (3 337 s), about 99.3 % of the 14 801 files the game loads byte-identical (verify_output; 740 hidden files
-  not built). Per step: convert-levels-r3 2 120 s (before the level fast paths: 247 paks), convert-banks 280 s (Python
-  encoder; ~30x less with vagenc.dll), convert-actors-r3 153 s, convert-dc1 120 s, london-fade 111 s, hat-colour
+  not built). Per step: convert-levels-r3 2 120 s (before the level fast paths: 247 paks), convert-banks 280 s (old
+  encoder, removed in 0.10.113), convert-actors-r3 153 s, convert-dc1 120 s, london-fade 111 s, hat-colour
   ~105 s, map-colors2 79 s, levels-lab 69 s, cloud-batches 42 s, port 27 s and r2 20 s (were 529 s and 6 146 s in
   the 1.7.0 full build, which built the hidden paks), every other step under 30 s.
 * Level fast paths: 11 large/medium r3 paks in 43 s instead of 90 s (same machine, 10 workers), all identical.
