@@ -30,6 +30,17 @@ reasons.
 - **If you think something really needs another language, stop and ask the owner** before writing it. Do not write it
   "for now".
 
+## Map fixes live in the PS3 -> PS4 conversion itself
+
+- **Every map and asset fix goes into the converter step that ports the PS3 data to PS4** (the level, actor, DC,
+  sound and particle converters in `u3mp/patcher/tools/fixes/`), as a general rule, so a map comes out of that step
+  already fixed.
+- **Do not add new recipe steps that patch converted maps afterwards.** No "fix-up" step that edits a converted pak,
+  no per-map patch, no md5- or offset-locked edit.
+- Existing after-the-fact fix steps (map-colors, map-lighting, london-fade, water-jitter, grass-leaf,
+  facility-collapse, wall-emblem and the like) are moved into the converter step when you touch them, and the old
+  step is removed.
+
 ## Keep it simple, but legal and exact
 
 - **Prefer the simplest implementation that does the job**, with fewer moving parts, fewer special cases and no
