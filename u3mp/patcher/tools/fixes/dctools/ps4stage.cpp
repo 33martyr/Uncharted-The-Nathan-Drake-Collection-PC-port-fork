@@ -1587,10 +1587,24 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
             }
         }
         if (groups.size() < pr.groups.size()) approx();   // LOD1+ groups dropped like retail
+        // collision proxies: the art library's collision materials (library/utilities/lib-collision/collision,
+        // general/collision/collision: a flat purple tint, or the magenta default-collision-color) mark geometry made
+        // for the collision mesh only; on PS3 it is never seen. Museum's wide pak has a 1133-vertex one as the sea bed
+        // 0..10 m under the ocean (water at y -44.2): the PS4 water program refracts the scene behind it and showed it as
+        // a pink sea. A prototype that draws other groups too leaves its collision groups out of the render geometry
+        // (the collision data is converted separately); a prototype of collision groups only stays as it is.
+        static const std::regex COLLISION_MAT(R"(^(library/utilities/lib-collision|general/collision)/collision$)");
+        const bool drop_collision = opt.fixes && std::any_of(groups.begin(), groups.end(), [](const bg::Group &x) {
+            return !std::regex_match(x.mat, COLLISION_MAT);
+        });
         ProtoW P_;
         P_.name = pname;
         for (size_t gi = 0; gi < groups.size(); gi++) {
             const bg::Group &g = groups[gi];
+            if (drop_collision && std::regex_match(g.mat, COLLISION_MAT)) {
+                approx();
+                continue;
+            }
             for (uint32_t c0 = g.first; c0 < g.first + g.count; c0 += MAX_BLOCKS) {
                 Submesh rec;
                 for (uint32_t b = c0; b < std::min(g.first + g.count, c0 + MAX_BLOCKS); b++) rec.chunk.push_back(b);
