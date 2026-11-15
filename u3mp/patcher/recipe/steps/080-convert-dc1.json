@@ -39,9 +39,10 @@
   "work/overlay-r3/u3data/build/main/dc1/ps4/render-settings/game/*",
   "work/overlay-r2/u3data/build/main/dc1/ps4/render-settings/game/*"
  ],
+ "reference_check": false,
  "status": "partial",
  "log_lines": 20,
  "notes": "152 whole-file conversions (list dcconv/dc1-convert.tsv). The converter learns the object layouts from the 2026-10-27 cloud conversions (tools/dcconv/schema-oldconv.json, shipped, structure only) and from the user's own PS3 disc / PS4 Collection DC pairs (learned once, ~10 min, cached in work/_dcconv). Verified 2026-11-05: 72 of the 152 reproduce the cloud conversion sha256-identical (69 ss-multiplayer + 3 render-settings); the step writes only those; dc-recipes rebuilds the other 80 exactly. Files that already exist are left alone (later fixes patch some in place). The rest of overlay-r3 dc1 (net.bin, menu.bin, modules.bin, medals, looks, scenes, vox*, weapon-*, net-always-loaded, ss-coop-adv-fort, skel-retargets) are retail PS4 modules merged with PS3 data by cloud scripts that are lost: not whole-file conversions, not covered here. Since 2026-11-13 C++ (u3fix.exe convert-dc1 = dcconv.py + convert_dc1.py): the learned retail schema equals the Python one (14 s instead of ~10 min; hdrtab order aside, which Python randomizes), 72/72 identical, no Python.",
  "recipe_version_added": "1.0.0",
- "recipe_version_changed": "1.2.0"
+ "recipe_version_changed": "1.20.0"
 }
