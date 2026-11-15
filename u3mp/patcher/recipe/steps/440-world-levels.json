@@ -1,0 +1,29 @@
+{
+ "id": "world-levels",
+ "title": "London Underground station loads after the train: world-london-mp registered in overlay-r3 pak23_ps4.txt (u3fix.exe world-levels, world-levels/world_levels.cpp)",
+ "kind": "script",
+ "job": "world-levels",
+ "with_jobs": [
+  "dctools"
+ ],
+ "family": "pak23_ps4.txt",
+ "needs": [],
+ "commands": [
+  [
+   "u3fix.exe",
+   "world-levels",
+   "--apply",
+   "--project",
+   "{{PROJECT}}"
+  ]
+ ],
+ "writes": [
+  "work/overlay-r3/u3data/build/main/pak23_ps4.txt"
+ ],
+ "must_write": false,
+ "reference_check": false,
+ "status": "needs-converted-base",
+ "applied": "2026-11-15 (player's import; in-game check pending)",
+ "notes": "Competitive London Underground: after the train stage the station (ldn-train-multi) never loaded, so there was no map or collision and players fell on every respawn. On PS3 the world level world-london-mp-ingame12.pak streams it in (REGION_TREE rgn-ldn-world-1: ldn-multi-pak, -comp-pak, -lit, tc01..06, tunnel, tunnel-2, ldn-train-multi, killvis); the train map's net.bin level list does not name ldn-train-multi. convert-levels-r3 now builds that pak (plan.tsv row, status equivalent) and this step registers it after the world-grave-mp block, because registry-final writes the reference registry, which lacks it. Runs after registry-final and remove-lab. Idempotent: 'already applied' when the block is there; no pak = nothing registered. world-yemen-mp (Airstrip) is missing too but its levels are all in net.bin's list, so it is not added. reference_check false: manifest.tsv predates the step.",
+ "recipe_version_added": "1.20.0"
+}
