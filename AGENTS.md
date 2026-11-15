@@ -2,17 +2,20 @@
 
 These rules apply to every change in this repository. They are the owner's decision and are not up for discussion.
 
-## Language: C++ above everything else
+## Language: EVERYTHING in C++. No C, no Python.
 
-**C++ is the language of this project. Everything is written in C++.** Another language is used only where C++ is
-really impossible or clearly not practical, and that case is rare. "It is quicker", "the file is already C" or "it is
-just a small script" are not reasons.
+**The goal is a codebase that is 100% C++.** Another language is used only where C++ is really impossible or clearly
+not practical, and that case is rare. "It is quicker", "the file is already C" or "it is just a small script" are not
+reasons.
 
 - **Write all new code in C++** (C++20, built with clang through the existing `build.sh` / CMake setups). This includes
   tools, tests, build and import steps, one-off helpers and fixes.
-- **No new C.** Existing C (for example the Uncharted 3 helper's `u3_lan_profiles.c` and its `.inc` files) is being
-  ported to C++: when you change a C function, move it to C++ instead of growing the C. Do not add C files or C
-  functions.
+- **All existing C is ported to C++.** That covers the Uncharted 3 helper's `u3_lan_profiles.c` and its `.inc` files,
+  the PC runtime `gow3_pc/src/*.c` and every other `.c` / `.h`. Porting them is a goal in itself, not only "when you
+  change a function". Do not add C files or C functions.
+- **"Done" means the code is C++.** Reimplementing game code from descriptions and moving our own C to C++ are both
+  part of the job; a component still written in C is not finished.
+- **Report progress as the share of C++ in the repository** (GitHub's language bar), not only as functions or groups.
 - **No Python, ever.** Never add a Python file (`.py`, `.pyw`, `.pyi`, notebooks): not for a feature, a fix, a "quick"
   tool, a test, a build step, a one-off script or a CI step. Never extend existing Python: port the tool (or the part
   you need) to C++, switch the callers, and remove the Python file in its own commit. Never copy Python files into new
