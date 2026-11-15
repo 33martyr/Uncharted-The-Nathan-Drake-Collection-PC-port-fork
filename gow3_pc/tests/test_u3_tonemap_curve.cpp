@@ -39,7 +39,8 @@ int main() {
     float c[48], before[48];
     fill(c);
     std::memcpy(before, c, sizeof c);
-    assert(u3fix::improved_tonemap_curve(c, rs, true));
+    // gamma mode: the curve's own constants (the PS4 shader then raises them to 1/2.2)
+    assert(u3fix::improved_tonemap_curve(c, rs, true, false));
     const float q = std::exp2(-4.1f);
     int checked = 0;
     for (int channel = 0; channel < 3; channel++) {
@@ -54,6 +55,26 @@ int main() {
             checked++;
         }
     }
+    // display mode (default): after the shader's clamp and 1/2.2 power, the display value is HBD(v) / w within 0.002
+    fill(c);
+    assert(u3fix::improved_tonemap_curve(c, rs, true));
+    float worst = 0;
+    for (int channel = 0; channel < 3; channel++) {
+        for (float colour = 0.001f; colour < 2000.0f; colour *= 1.1f) {
+            const float v = q * before[36 + channel] * colour + before[40 + channel] - 0.003f;
+            if (v < 1e-4f) continue;
+            const float want = std::fmin(1.0f, hbd(v) / 0.95f);
+            const float y = std::fmin(1.0f, std::fmax(0.0f, shader_curve(c, channel, colour)));
+            const float got = std::pow(y, 1.0f / 2.2f);
+            worst = std::fmax(worst, std::fabs(got - want));
+            if (std::fabs(got - want) > 0.002f) {
+                std::printf("display: channel %d colour %g: %.5f, curve %.5f\n", channel, colour, got, want);
+                return 1;
+            }
+            checked++;
+        }
+    }
+    std::printf("display mode: worst display error %.5f\n", worst);
     // only the curve and the levels change
     for (int i = 0; i < 48; i++) {
         const bool curve = i == 0 || i == 1 || (i >= 4 && i <= 6) || (i >= 36 && i <= 38) || (i >= 40 && i <= 42);

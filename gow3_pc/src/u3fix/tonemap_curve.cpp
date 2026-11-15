@@ -16,7 +16,7 @@
 // runs right after that last store and, when the curve applies, rewrites c0, c1, c4..c6 and folds the exposure and the
 // black point into the levels scale and offset, as PS3 does. It does nothing while the game's "T1 style filmic curve"
 // debug switch is off (the builder then uses a fixed curve of its own instead of the render settings).
-// UNCHARTED_IMPROVED_TONEMAP=0 leaves the PS4 behaviour (filmic curve only).
+// Default since 15 Nov 2026: the filmic curve; the improved curve only on request (install_improved_tonemap_curve).
 #include "u3fix.h"
 #include "u3fix_hook.h"
 
@@ -25,10 +25,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace u3fix {
 
-bool improved_tonemap_curve(float *constants, const unsigned char *settings, bool t1_curve) {
+// Two ways to show the improved curve (neither is the default, see install_improved_tonemap_curve). The Hejl /
+// Burgess-Dawson curve (HBD) already contains a display gamma, while the PS4 tonemap shader always raises the curve's
+// result to 1/2.2. display = true writes the curve whose 1/2.2 power is HBD itself: y = HBD(v)^2.2 / w^2.2, in the
+// shader's form c4 + (c5 v + c6) / (v^2 + c0 v + c1) with y(0) = 0; the constants are a fit made for this port
+// (after the 1/2.2 power within 0.0017 of HBD(v) for v in 1e-4..32; 8-bit display steps are 0.0039), and the white
+// point scales c4..c6 by w^-2.2. display = false keeps the curve's own constants (HBD gamma-encoded again).
+bool improved_tonemap_curve(float *constants, const unsigned char *settings, bool t1_curve, bool display) {
     uint32_t curve_type;
     float use, bias, black, white;
     std::memcpy(&curve_type, settings + 0x70c, 4);
@@ -37,13 +45,23 @@ bool improved_tonemap_curve(float *constants, const unsigned char *settings, boo
     std::memcpy(&black, settings + 0x738, 4);
     std::memcpy(&white, settings + 0x73c, 4);
     if (!t1_curve || curve_type != 1 || use < 0.5f) return false;
-    // the Hejl / Burgess-Dawson curve with its x^2 term divided out: v (v + a) / (v^2 + b v + k) = 1 + ((a - b) v - k) / (...)
-    const float a = 0.5f / 6.2f, b = 1.7f / 6.2f, k = 0.06f / 6.2f;
-    constants[0] = b;
-    constants[1] = k;
-    constants[4] = 1.0f / white;
-    constants[5] = (a - b) / white;
-    constants[6] = -k / white;
+    if (display) {
+        constexpr float c0 = 0.445557023f, c1 = 0.0275066962f, c5 = -0.447434753f, c4 = 1.00402214f;
+        const float s = std::pow(white, -2.2f);
+        constants[0] = c0;
+        constants[1] = c1;
+        constants[4] = c4 * s;
+        constants[5] = c5 * s;
+        constants[6] = -c4 * c1 * s;
+    } else {
+        // the Hejl / Burgess-Dawson curve with its x^2 term divided out: v (v + a) / (v^2 + b v + k) = 1 + ((a - b) v - k) / (...)
+        const float a = 0.5f / 6.2f, b = 1.7f / 6.2f, k = 0.06f / 6.2f;
+        constants[0] = b;
+        constants[1] = k;
+        constants[4] = 1.0f / white;
+        constants[5] = (a - b) / white;
+        constants[6] = -k / white;
+    }
     const float scale = std::exp2(bias);
     for (int i = 0; i < 3; i++) {
         constants[36 + i] *= scale;
@@ -57,9 +75,103 @@ namespace {
 std::atomic<uint64_t> g_frames{0};
 std::atomic<uint32_t> g_last{0}, g_reports{0};
 
+std::atomic<uint64_t> g_seen{0}, g_candidate{0};
+std::atomic<uint32_t> g_seen_reports{0}, g_stable{0};
+
+// gow3 15 Nov 2026 diagnostic (Village / Museum / Borneo brightness against PS3): the tonemap fields of the live render
+// settings the constant builder gets (which of a level's render settings is in use, and whether the improved curve
+// applies), printed when they change and then hold for 30 frames (region blends in between are not printed; 2 decimals;
+// at most 80 lines). UNCHARTED_TONEMAP_LOG=0 turns it off.
+void log_settings(const unsigned char *settings, uint32_t t1_curve) {
+    static const bool on = [] {
+        const char *env = std::getenv("UNCHARTED_TONEMAP_LOG");
+        return !(env && env[0] == '0');
+    }();
+    if (!on || g_seen_reports.load(std::memory_order_relaxed) >= 80) return;
+    uint32_t method, curve;
+    float mn, mx, set, fbias, use, ibias, black, white;
+    std::memcpy(&method, settings + 0x6f0, 4);
+    std::memcpy(&mn, settings + 0x6f4, 4);
+    std::memcpy(&mx, settings + 0x6f8, 4);
+    std::memcpy(&set, settings + 0x708, 4);
+    std::memcpy(&curve, settings + 0x70c, 4);
+    std::memcpy(&fbias, settings + 0x72c, 4);
+    std::memcpy(&use, settings + 0x730, 4);
+    std::memcpy(&ibias, settings + 0x734, 4);
+    std::memcpy(&black, settings + 0x738, 4);
+    std::memcpy(&white, settings + 0x73c, 4);
+    uint64_t key = 1469598103934665603ull;
+    const float q[] = {mn, mx, set, fbias, use, ibias, white};
+    for (float v : q) key = (key ^ static_cast<uint64_t>(std::lround(v * 100.0f) & 0xffff)) * 1099511628211ull;
+    key = (key ^ (method | curve << 4 | (t1_curve & 0xff) << 8)) * 1099511628211ull;
+    if (key == g_seen.load(std::memory_order_relaxed)) return;
+    if (g_candidate.exchange(key, std::memory_order_relaxed) != key) {
+        g_stable.store(0, std::memory_order_relaxed);
+        return;
+    }
+    if (g_stable.fetch_add(1, std::memory_order_relaxed) < 30) return;
+    g_seen.store(key, std::memory_order_relaxed);
+    g_seen_reports.fetch_add(1, std::memory_order_relaxed);
+    const bool applies = (t1_curve & 0xff) != 0 && curve == 1 && use >= 0.5f;
+    std::printf("Uncharted 3: tonemap settings: method %u range %.3f..%.3f set-point %.3f curve %u filmic bias %.3f, "
+                "improved curve %s (use %.2f bias %.3f black %.4f white %.3f), T1 %u\n",
+                method, mn, mx, set, curve, fbias, applies ? "on" : "off", use, ibias, black, white, t1_curve & 0xff);
+    std::fflush(stdout);
+}
+
+std::atomic<int> g_mode{0};   // 0 filmic (no rewrite), 1 improved curve as a display value, 2 improved curve then gamma
+
+}  // namespace
+
+// The owner's switch file: "u3-switches.txt" in the --user folder (the launcher passes --user; the game's command line
+// is read back here, so no environment variable is needed), one word per line. Read once.
+bool user_switch(const char *word) {
+    static const std::vector<std::string> words = [] {
+        std::vector<std::string> out;
+        std::string user;
+#ifdef _WIN32
+        for (int i = 1; i + 1 < __argc; i++)
+            if (__argv[i] && std::strcmp(__argv[i], "--user") == 0) user = __argv[i + 1];
+#else
+        if (FILE *f = std::fopen("/proc/self/cmdline", "rb")) {
+            std::string all, prev;
+            char ch;
+            while (std::fread(&ch, 1, 1, f) == 1) all.push_back(ch);
+            std::fclose(f);
+            for (size_t p = 0; p < all.size();) {
+                const std::string arg = all.c_str() + p;
+                if (prev == "--user") user = arg;
+                prev = arg;
+                p += arg.size() + 1;
+            }
+        }
+#endif
+        if (user.empty()) return out;
+        if (FILE *f = std::fopen((user + "/u3-switches.txt").c_str(), "rb")) {
+            char line[256];
+            while (std::fgets(line, sizeof line, f)) {
+                std::string s(line);
+                while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
+                if (!s.empty()) out.push_back(s);
+            }
+            std::fclose(f);
+        }
+        return out;
+    }();
+    for (const std::string &w : words)
+        if (w == word) return true;
+    return false;
+}
+
+namespace {
+
 // called from the stub with the constant block (r12), the render settings (rbx) and the T1 switch (r15b)
 __attribute__((sysv_abi)) void tonemap_hook(float *constants, const unsigned char *settings, uint32_t t1_curve) {
-    if (!constants || !settings || !improved_tonemap_curve(constants, settings, (t1_curve & 0xff) != 0)) return;
+    if (settings) log_settings(settings, t1_curve);
+    if (!constants || !settings ||
+        g_mode.load(std::memory_order_relaxed) == 0 ||
+        !improved_tonemap_curve(constants, settings, (t1_curve & 0xff) != 0, g_mode.load(std::memory_order_relaxed) == 1))
+        return;
     g_frames.fetch_add(1, std::memory_order_relaxed);
     uint32_t bias_bits;
     std::memcpy(&bias_bits, settings + 0x734, 4);
@@ -107,7 +219,15 @@ void xmm_slot(unsigned char *p, unsigned &n, unsigned reg, int32_t disp, bool st
 }  // namespace
 
 bool install_improved_tonemap_curve(unsigned char *image, uint64_t size) {
-    if (const char *env = std::getenv("UNCHARTED_IMPROVED_TONEMAP"); env && env[0] == '0') return false;   // A/B: off
+    // Default: the PS4 filmic curve, as retail PS4 draws every level (owner's tests, 15 Nov 2026: Borneo co-op looked
+    // right only with the filmic curve; with the improved curve gamma-encoded again it was too light, shown as a
+    // display value far too dark). The hook is still installed for the "tonemap settings" log; it rewrites the
+    // constants only on request: tonemap-improved (the curve as a display value) or tonemap-gamma (its own constants,
+    // then the shader's gamma) in u3-switches.txt, or UNCHARTED_IMPROVED_TONEMAP=1 / =gamma.
+    const char *env = std::getenv("UNCHARTED_IMPROVED_TONEMAP");
+    const bool gamma = (env && std::strcmp(env, "gamma") == 0) || user_switch("tonemap-gamma");
+    const bool display = (env && env[0] == '1') || user_switch("tonemap-improved");
+    g_mode.store(gamma ? 2 : display ? 1 : 0, std::memory_order_relaxed);
     const uint64_t site = find_unique(image, size, kSite, sizeof(kSite));
     if (site == kNotFound) return false;
     unsigned char *stub = stub_page_near(image, size);
@@ -144,8 +264,11 @@ bool install_improved_tonemap_curve(unsigned char *image, uint64_t size) {
     const uint64_t back = reinterpret_cast<uint64_t>(image + at + kStoreLength);
     std::memcpy(stub + n, &back, 8); n += 8;
     if (!finish_stub(stub) || !jump_to(image, at, kStoreLength, stub)) return false;
-    std::printf("Uncharted 3: improved tonemap curve of the render settings at the constant builder %#llx\n",
-                static_cast<unsigned long long>(at));
+    std::printf("Uncharted 3: improved tonemap curve of the render settings at the constant builder %#llx (%s)\n",
+                static_cast<unsigned long long>(at),
+                gamma     ? "improved curve, gamma-encoded again (tonemap-gamma)"
+                : display ? "improved curve as a display value (tonemap-improved)"
+                          : "filmic curve as on PS4; tonemap settings log only");
     std::fflush(stdout);
     return true;
 }

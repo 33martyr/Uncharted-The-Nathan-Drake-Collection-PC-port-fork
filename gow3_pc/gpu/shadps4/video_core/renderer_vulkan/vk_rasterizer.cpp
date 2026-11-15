@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <string>
 #include <chrono>
 #include <mutex>
 #include <optional>
@@ -4693,6 +4695,91 @@ void Rasterizer::EmitVertexBuffers() {
     });
 }
 
+// gow3 15 Nov 2026 diagnostic (GOW3_U3_EXPOSURE_LOG=1; Village / Museum brighter than PS3): Uncharted 3's auto
+// exposure ends in cs 04f81a8f. Its slot 0 holds the level's tonemap constants (dwords: 0 set-point, 1 adaptation
+// rate, 2 exposure offset, 3 / 4 the light range, 5 manual EV, 28 method bits, 29 filter size), its slot 1 (16 bytes,
+// GPU-written) the state: 0 = 2^(EV + offset), the scale the tonemap applies, 1 = EV, 2 = this frame's mean luminance
+// (cs 7095d6c2), 3 = 6 + log2 of the filtered mean. Every 2 seconds the state is read back to guest memory after the
+// submission and the previous reading is printed with the constants, so a log shows whether the exposure sits at the
+// top of the light range (a mean measured too small) or where PS3's formula EV = set-point - (6 + log2 mean) puts it.
+// Off by default (GOW3_U3_EXPOSURE_LOG=1, or the word exposure-log in u3-switches.txt in the --user folder): the read
+// back puts GPU values into guest memory that the port otherwise never fills.
+static bool U3ExposureLogOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("GOW3_U3_EXPOSURE_LOG");
+        if (env && env[0] == '1') {
+            return true;
+        }
+        // or the word "exposure-log" on its own line in u3-switches.txt in the game's --user folder
+        std::string user;
+#ifdef _WIN32
+        for (int i = 1; i + 1 < __argc; i++) {
+            if (__argv[i] && std::strcmp(__argv[i], "--user") == 0) {
+                user = __argv[i + 1];
+            }
+        }
+#endif
+        if (user.empty()) {
+            return false;
+        }
+        bool found = false;
+        if (FILE* f = std::fopen((user + "/u3-switches.txt").c_str(), "rb")) {
+            char line[256];
+            while (std::fgets(line, sizeof line, f)) {
+                std::string s(line);
+                while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) {
+                    s.pop_back();
+                }
+                found = found || s == "exposure-log";
+            }
+            std::fclose(f);
+        }
+        if (found) {
+            std::printf("U3 exposure: logging every 2 s (exposure-log in %s/u3-switches.txt)\n", user.c_str());
+            std::fflush(stdout);
+        }
+        return found;
+    }();
+    return on;
+}
+
+// returns true when the state slot's 16 bytes should be read back after this submission
+static bool U3ExposureTrace(u64 shader, u32 slot, VAddr address, bool written) {
+    if (shader != 0x04f81a8fULL || !U3ExposureLogOn()) {
+        return false;
+    }
+    static VAddr consts = 0;
+    static VAddr state = 0;
+    static auto next = std::chrono::steady_clock::time_point{};
+    if (slot == 0 && !written) {
+        consts = address;
+        return false;
+    }
+    if (slot != 1 || !written) {
+        return false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next) {
+        return false;
+    }
+    next = now + std::chrono::seconds(2);
+    if (state == address && consts) {
+        u32 s[4]{}, c[30]{};
+        if (Core::Memory::Instance()->TryReadBacking(state, s, sizeof(s)) &&
+            Core::Memory::Instance()->TryReadBacking(consts, c, sizeof(c))) {
+            const auto f = [](u32 v) { return std::bit_cast<float>(v); };
+            std::printf("U3 exposure: EV %.3f (scale %.3f), mean %.5f (frame %.5f), set-point %.3f range "
+                        "%.3f..%.3f offset %.3f rate %.3f manual %.3f method %#x filter %u -> PS3 EV %.3f\n",
+                        f(s[1]), f(s[0]), std::exp2(f(s[3]) - 6.0f), f(s[2]), f(c[0]), f(c[3]), f(c[4]), f(c[2]),
+                        f(c[1]), f(c[5]), c[28], c[29],
+                        std::max(f(c[3]), std::min(f(c[4]), f(c[0]) - f(s[3]))));
+            std::fflush(stdout);
+        }
+    }
+    state = address;
+    return true;
+}
+
 // gow3 diagnostics (GOW3_CLOTH_PEEK=1): who reads the cloth solvers' outputs (1c957b01,
 // 809864d3), and whether what they read is the newest output (the solver's latest dispatch), an
 // older one, or no cloth output at all (for readers that read cloth outputs at other times).
@@ -5671,6 +5758,10 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 }
                 if (stage.pgm_hash == 0x9f801363 && !desc.is_written && size >= 32) {
                     FixAimFocusCentre(memory, buffer_cache, vsharp.base_address);
+                }
+                if (U3ExposureTrace(stage.pgm_hash, buffer_index, vsharp.base_address, desc.is_written) &&
+                    size >= 16) {
+                    eop_readbacks.emplace_back(vsharp.base_address, 16);
                 }
                 static const bool cloth_peek = [] {
                     const char* env = std::getenv("GOW3_CLOTH_PEEK");
