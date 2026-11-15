@@ -6,4 +6,4 @@ old-versus-new test at -O1 and -O2 before it was added here. Nothing in this fol
 the files are merged into `u3x_fixes.cpp` in one step when all groups are done.
 
 `CONVENTIONS.h` holds the shared small tools the files use (single-precision float steps, pointer test, game call).
-Three groups that talk to the online service are not in this folder.
+Five groups that talk to the online service are not in this folder.
