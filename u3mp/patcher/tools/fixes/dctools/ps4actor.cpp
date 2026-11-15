@@ -5,6 +5,7 @@
 #include "fgcoll.hpp"
 #include "ps3bg.hpp"
 #include "ps4writer.hpp"
+#include "stageplan.hpp"
 #include "skel.hpp"
 #include "texcodec.hpp"
 #include "u3fix.hpp"
@@ -270,8 +271,14 @@ const std::vector<std::pair<std::string, std::vector<std::string>>> &tex_kinds(b
 // am also knows the eye / teeth naming x_c / x_clr (colour) and x_n / x_nmt (normal)
 std::optional<std::string> tex_kind(const std::string &shrt, bool am = false) {
     const std::string base = before(before(shrt, ".tga"), ".dds");
-    for (const auto &[suf, ps] : tex_kinds(am))
-        if (ends_with(base, suf) || has(base, suf + "-")) return suf;
+    for (const auto &[suf, ps] : tex_kinds(am)) {
+        // a suffix followed by '_' counts too ('grave-mako-shark-low-color_dlt': without it the shark's colour slot was
+        // the grey flat-color)
+        if (ends_with(base, suf)) return suf;
+        // ... but a map named after another one is not that map: 'x-color-mask' is a (white) mask of x-color, and taken
+        // as the colour map it drew the Sanctuary railings plain white
+        if ((has(base, suf + "-") || has(base, suf + "_")) && !ends_with(base, "-mask")) return suf;
+    }
     if (am && (ends_with(base, "_c") || ends_with(base, "_clr"))) return "-color";
     if (am && (ends_with(base, "_n") || ends_with(base, "_nmt"))) return "-normal";
     return std::nullopt;
@@ -847,7 +854,9 @@ Bytes convert(const fs::path &ps3_path, const fs::path &tmpl_path, const Kw &kw,
         const std::string full4 = cook_prefix() + shrt;
         auto db = std::make_shared<Blob>("vramdesc");
         db->u64(0).u64(voff).u32(uint32_t(tiled.size())).u32(hash_);
-        db->u32(1).u32(fmt4);
+        // a retail cube map (+0x20 0x06......, 8 face slots per mip) keeps the retail type 2: as type 1 the game reads
+        // the first face as a 2D texture (env reflections of hero-london, every actor without the 'cubefix' post pass)
+        db->u32(unk20 && (*unk20 >> 24) == 6 ? 2 : 1).u32(fmt4);
         db->u32(unk20 ? *unk20 : ((fmt4 == 0x48 || fmt4 == 0x4b || fmt4 == 0x4e) ? 0x010f0000 : 0x01000000));
         db->u32(mips).u32(w_).u32(h_).u32(0).u32(flags ? *flags : uint32_t(kw.stream_flags));
         db->ptr(db, 0x40);
@@ -1102,6 +1111,16 @@ Bytes convert(const fs::path &ps3_path, const fs::path &tmpl_path, const Kw &kw,
                 Ps3Tex *c = nullptr;
                 for (Ps3Tex *x : own)
                     if (x->kind == want[0]) { c = x; break; }
+                // a colour slot of a material with no '-color' texture: its base map is the texture whose name carries no
+                // role at all (the MP kit hunter shirts' 'shirt-jollyroger.tga'): without this the slot kept the template's
+                // texture, another shirt's ('shirt-pogo-color', pink) on all of them. Made sRGB like every colour map.
+                if (!c && want[0] == "-color")
+                    for (Ps3Tex *x : own)
+                        if (!x->kind && stage::tex_role_final(x->shrt) == std::string("color") && !has(lower(x->shrt), "-height") && !has(lower(x->shrt), "-ao")) {
+                            c = x;
+                            if (!c->real) c->fmt4 = c->fmt4 == 0x47 ? 0x48 : c->fmt4 == 0x4d ? 0x4e : c->fmt4 == 0x4a ? 0x4b : c->fmt4;
+                            break;
+                        }
                 TexP de;
                 if (!c && !donors.empty()) {
                     Ps3Tex *col = nullptr;

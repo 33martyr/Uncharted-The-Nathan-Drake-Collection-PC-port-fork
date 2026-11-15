@@ -54,6 +54,49 @@ uint32_t sidu(const std::string &latin1) { return sid(bg::utf8_of(latin1)); }
 
 // a float32 as Python gives it back after struct.unpack + struct.pack (a signalling NaN comes out quiet)
 uint32_t quiet(uint32_t bits) { return ((bits & 0x7f800000u) == 0x7f800000u && (bits & 0x7fffffu)) ? bits | 0x400000u : bits; }
+// a shader constant name as its parts: 'g_fUvScale_fUv2Scale' -> {g_fUvScale, g_fUv2Scale} (every part after 'g_' a
+// lower-case letter then an upper-case letter or digit, one float each); any other name is one part
+std::vector<std::string> name_parts(const std::string &k) {
+    if (k.compare(0, 2, "g_") != 0) return {k};
+    std::vector<std::string> parts;
+    size_t a = 2;
+    for (;;) {
+        const size_t e = k.find('_', a);
+        parts.push_back(k.substr(a, e == std::string::npos ? std::string::npos : e - a));
+        if (e == std::string::npos) break;
+        a = e + 1;
+    }
+    if (parts.size() < 2) return {k};
+    for (const std::string &s : parts)
+        if (s.size() < 2 || !std::islower((unsigned char)s[0]) || !(std::isupper((unsigned char)s[1]) || std::isdigit((unsigned char)s[1]))) return {k};
+    for (std::string &s : parts) s = "g_" + s;
+    return parts;
+}
+// the scalar parts of a material's constants: each part of a packed name, and every one-float constant
+std::map<std::string, double> packed_parts(const bg::Params &ps) {
+    std::map<std::string, double> out;
+    for (const auto &[k, v] : ps) {
+        const std::vector<std::string> pn = name_parts(k);
+        if (pn.size() > 1) {
+            for (size_t j = 0; j < pn.size() && j < v.size(); j++) out.emplace(pn[j], v[j]);
+        } else if (v.size() == 1)
+            out.emplace(k, v[0]);
+    }
+    // the old surface shaders' one scroll speed (UV per second) is the prime-shader's layer-1 scroll
+    if (auto x = out.find("g_fTimeScrollX"); x != out.end()) out.emplace("g_timeScrollU1", x->second);
+    if (auto y = out.find("g_fTimeScrollY"); y != out.end()) out.emplace("g_timeScrollV1", y->second);
+    return out;
+}
+// the prime-shader constants that move a surface over time
+bool motion_param(const std::string &n) {
+    auto digit_end = [&](const char *pre) {
+        const size_t l = std::strlen(pre);
+        return n.size() == l + 1 && n.compare(0, l, pre) == 0 && std::isdigit((unsigned char)n.back());
+    };
+    return digit_end("g_timeScrollU") || digit_end("g_timeScrollV") || digit_end("g_distortionSpeed") || digit_end("g_distortionIntensity") ||
+           digit_end("g_tiltVelocity") || digit_end("g_animAmplitude") || n == "g_flowTiltVelocity";
+}
+
 uint32_t f32b(double d) {
     const float f = float(d);
     uint32_t v;
@@ -774,41 +817,46 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
         uint32_t w_ = t.width, h_ = t.height, mips_ = t.mips;
         if (t.type == 2 && (comp || kind == "A8R8G8B8")) return convert_ps3_cubemap(t, texels, kind, bpb, path_ndb, flag);
         if (!comp) {
-            // uncompressed swizzled A8R8G8B8 (sky colour maps): deswizzle mip 0, rebuild the mip chain, encode BC3
+            // uncompressed swizzled A8R8G8B8 (sky colour maps, cloud / moon masks): kept uncompressed as PS4 B8G8R8A8, as
+            // retail keeps the same PS3 maps (sky-coop-airport-no-stars-color, sky-des-multi-color, sky-london-clouds-mask,
+            // the highrise moon maps): every PS3 mip deswizzled and remapped, no lossy re-encode. A map whose alpha is 0 in
+            // every texel was cooked from a source without alpha: alpha 255, as retail's cook of the same sources (every
+            // retail sky colour map is opaque; sky-des-multi-color: PS3 alpha 0, PS4 alpha 255)
             if (kind != "A8R8G8B8" || (w_ & (w_ - 1)) || (h_ & (h_ - 1))) return nullptr;
             const uint32_t rm = t.gcmRemapCtl & 0xffff;
-            const tc::Img img8 = opt.sky ? tc::sky::ps3_deswizzle_argb8(texels, w_, h_, rm ? rm : 0xaae4) : tc::ps3_deswizzle_argb8(texels, w_, h_, rm ? rm : 0xaae4);
-            std::vector<float> lv(img8.px.begin(), img8.px.end());
-            uint32_t lw = w_, lh = h_;
-            Bytes out;
-            uint32_t n = 0;
-            for (uint32_t k = 0; k < std::max(1u, mips_); k++) {
-                tc::Img q;
-                q.w = lw;
-                q.h = lh;
-                q.px.resize(lv.size());
-                for (size_t i = 0; i < lv.size(); i++) q.px[i] = uint8_t(std::clamp(std::nearbyint(lv[i]), 0.0f, 255.0f));
-                const Bytes e = opt.sky ? tc::sky::encode_bc3(q) : tc::encode_bc3(q);
-                out.insert(out.end(), e.begin(), e.end());
-                n++;
-                if (std::min(lw, lh) < 8) break;
-                const uint32_t nw = lw / 2, nh = lh / 2;
-                std::vector<float> d(size_t(nw) * nh * 4);
-                for (uint32_t y = 0; y < nh; y++)
-                    for (uint32_t x = 0; x < nw; x++)
-                        for (int c = 0; c < 4; c++) {
-                            auto at = [&](uint32_t xx, uint32_t yy) { return lv[(size_t(yy) * lw + xx) * 4 + c]; };
-                            d[(size_t(y) * nw + x) * 4 + c] = (((at(2 * x, 2 * y) + at(2 * x, 2 * y + 1)) + at(2 * x + 1, 2 * y)) + at(2 * x + 1, 2 * y + 1)) / 4.0f;
-                        }
-                lv.swap(d);
-                lw = nw;
-                lh = nh;
+            std::vector<tc::Img> lv;
+            uint64_t o = 0;
+            for (auto [mw, mh] : tc::mip_dims(w_, h_, std::max(1u, mips_))) {
+                const uint64_t n = uint64_t(mw) * mh * 4;
+                if (o + n > texels.size()) break;   // short PS3 data: the mips it has
+                lv.push_back(tc::ps3_deswizzle_argb8(Bytes(texels.begin() + std::ptrdiff_t(o), texels.begin() + std::ptrdiff_t(o + n)), mw, mh, rm ? rm : 0xaae4));
+                o += n;
             }
-            texels = out;
-            mips_ = n;
-            kind = "DXT5";
-            bpb = 16;
-            approx();   // PS3 A8R8G8B8 re-encoded as BC3
+            if (lv.empty()) return nullptr;
+            bool no_alpha = true;
+            for (size_t i = 3; i < lv[0].px.size() && no_alpha; i += 4) no_alpha = lv[0].px[i] == 0;
+            Bytes tiled8;
+            for (const tc::Img &m : lv) {
+                Bytes bgra(m.px.size());
+                for (size_t i = 0; i < m.px.size(); i += 4) {
+                    bgra[i] = m.px[i + 2];
+                    bgra[i + 1] = m.px[i + 1];
+                    bgra[i + 2] = m.px[i];
+                    bgra[i + 3] = no_alpha ? 255 : m.px[i + 3];
+                }
+                const Bytes tl = tc::tile_mip(bgra.data(), bgra.size(), m.w, m.h, 4);
+                tiled8.insert(tiled8.end(), tl.begin(), tl.end());
+            }
+            std::string role8 = tex_role_final(shrt).value_or("color");
+            if ((opt.sky || opt.fixes) && role8 == "color") {
+                const auto xr = xrole(shrt);
+                if (xr == "height" || xr == "inc" || xr == "blend") role8 = "mask";
+            }
+            const bool sr8 = srgb ? *srgb : (role8 == "color" || role8 == "spec" || role8 == "detail");
+            const uint32_t fmt8 = sr8 ? 0x5b : 0x57;   // B8G8R8A8_UNORM_SRGB / _UNORM
+            const uint32_t hsh = sidu(after_prefix(path_ndb));
+            const Bytes d = desc_bytes(hsh, 1, fmt8, sr8 ? 0x010f0000 : 0x01000000, uint32_t(lv.size()), w_, h_, flag);
+            return add_texture_desc(path_ndb, d, tiled8, gtex_bytes(hsh, starts_with(shrt, "lightmaps/") ? 0x1000 : 0x400, 1));   // class 1 = uncompressed (retail)
         }
         const uint32_t rm_ = t.gcmRemapCtl & 0xffff;
         if (comp && rm_ != 0xaae4 && (kind == "DXT5" || kind == "DXT3")) {
@@ -985,6 +1033,7 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
     std::optional<std::map<std::string, std::vector<std::string>>> own_leak;
     std::optional<bool> detail_leak;
     std::map<std::string, double> soft_override;
+    std::set<std::string> ov_uvscale2;   // materials whose PS3 overlay pair sits on a template overlay with a scaled UV 2
     fp::Ps3Programs progs(p);
     std::map<std::string, MatW> matrec;
     for (const std::string &n : names3) {
@@ -1042,8 +1091,43 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 auto it = own.find(r);
                 return it == own.end() || it->second.empty() ? nullptr : &it->second;
             };
+            // the PS3 material's overlay layers (stageplan overlay_pairs; colour + mask, both sampled with the second UV
+            // set, f[TEX0].zw, by the PS3 program): never a colour layer or a transparency slot of the template. PS4 counts
+            // UV sets from 0: a template's UVn reads vertex set 0 (stream slot 1) unless UV_n_USE_SET_1 moves it to set 1
+            // (slot 12, where the stage writes PS3 attribute 0x12; 304 of 305 retail submeshes of such materials carry
+            // slot 12, 1846 of 1895 without it carry none). A template overlay slot pair <d> on the second set
+            // (COLOR_d_OVERLAY_USE_UV2 + COLOR_d_OVERLAY_CONTROL_TEXTURE_USE_UV2 + UV_2_USE_SET_1, e.g. London's twin
+            // ldn-metal-shutter:war-metal-bronz) takes the PS3 pair; one laid out on another UV set gets a black control
+            // map: the overlay is off, as on the PS3 surfaces whose set-2 UVs are 0 (no graffiti)
+            std::vector<std::pair<std::string, std::string>> ovp;
+            if ((opt.sky || opt.fixes))
+                if (auto mi = m3.find(n); mi != m3.end())
+                    if (fp::uv_set2_reads(progs, n) >= 2) ovp = overlay_pairs(*mi->second, texs3);
+            for (const auto &[c, mk] : ovp) {
+                auto &vc = own["color"];
+                vc.erase(std::remove(vc.begin(), vc.end(), c), vc.end());
+                auto &vt = own["trans"];
+                vt.erase(std::remove(vt.begin(), vt.end(), mk), vt.end());
+            }
+            size_t ov_used = 0;
             std::map<std::string, size_t> used_role;
-            static const std::regex MASKN(R"(^g_tNdFetchMask\dMap$)"), TINTN(R"(^g_tNdFetchColorTintMask\dMap$)"), HT2(R"(/[0-9A-F]{16}(\.ndb)?$)");
+            static const std::regex MASKN(R"(^g_tNdFetchMask\dMap$)"), TINTN(R"(^g_tNdFetchColorTintMask\dMap$)"), HT2(R"(/[0-9A-F]{16}(\.ndb)?$)"),
+                HEIGHTN(R"(^g_tNdFetchHeight\dMap$)"), OVN(R"(^g_tNdFetchOverlay(\d)Map$)"), OVCN(R"(^g_tNdFetchOverlayControl(\d)Map$)");
+            // the overlay layer of each template overlay slot pair (one PS3 pair per layer, in binding order): its PS3
+            // pair index, or -1 when the template lays it out on another UV set (overlay off)
+            std::map<std::string, int> ov_layer;
+            for (const MatBind &b : rec0.binds) {
+                std::smatch om;
+                if (ovp.empty() || !std::regex_match(b.param, om, OVN)) continue;
+                const std::string d = om[1].str();
+                bool ctl = false;
+                for (const MatBind &x : rec0.binds) ctl = ctl || x.param == "g_tNdFetchOverlayControl" + d + "Map";
+                if (!ctl) continue;
+                auto feat = [&](const std::string &f) { return std::find(rec0.feats.begin(), rec0.feats.end(), f) != rec0.feats.end(); };
+                const bool set2 = feat("COLOR_" + d + "_OVERLAY_USE_UV2") && feat("COLOR_" + d + "_OVERLAY_CONTROL_TEXTURE_USE_UV2") && feat("UV_2_USE_SET_1");
+                ov_layer[d] = set2 && ov_used < ovp.size() ? int(ov_used++) : -1;
+                if (set2 && feat("UV_2_APPLY_SCALE")) ov_uvscale2.insert(n);   // the set-2 scale: the PS3 value, else 1 (below)
+            }
             for (const MatBind &b : rec0.binds) {
                 auto role = param_role(b.param);
                 if (role == "spec") role = "mask";
@@ -1058,6 +1142,35 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                     detail_leak = detail_layer;
                 }
                 TexP e = lightmap_entry(b.param);
+                if (!e && !ov_layer.empty()) {
+                    std::smatch om;
+                    const bool col = std::regex_match(b.param, om, OVN), ctl = !col && std::regex_match(b.param, om, OVCN);
+                    if (col || ctl)
+                        if (auto li = ov_layer.find(om[1].str()); li != ov_layer.end()) {
+                            if (li->second >= 0) e = texture_for_short(col ? ovp[size_t(li->second)].first : ovp[size_t(li->second)].second);
+                            else if (ctl) e = flat_texture(std::string("mask"), b.param);   // black: the overlay is off
+                        }
+                }
+                // a texture twin (stageplan): its bindings already name the PS3 material's own textures (the retail copy
+                // first, else the PS3 one by short path); only the env map follows the role rules (the level's own)
+                if (!e && pe->twin && !has(b.param, "Environment") && !has(b.param, "EnvCube")) e = texture_for_full(b.full, b.shrt);
+                // a template of the PS3 material's own shader family: a slot whose retail texture the PS3 material uses
+                // too keeps it, else the PS3 texture of the slot's role, else the retail texture (never a flat one)
+                if (std::find(pe->cls.begin(), pe->cls.end(), "shader") != pe->cls.end()) {
+                    bool same = false;
+                    for (const auto &[r, v] : own) same = same || std::find(v.begin(), v.end(), b.shrt) != v.end();
+                    // the env cube: the PS3 material's own env map, as for water.fx below (not the donor level's cube)
+                    if (!e && !same && has(b.param, "EnvCube"))
+                        if (const auto *v = own_get("env")) e = texture_for_short((*v)[0]);
+                    if (!e && !same && role && *role != "lightmap" && own_get(*role)) {
+                        const size_t k = used_role[*role]++;
+                        const auto &v = *own_get(*role);
+                        e = texture_for_short(v[std::min(k, v.size() - 1)]);
+                    }
+                    if (!e) e = texture_for_full(b.full, b.shrt);
+                    mw.binds.push_back({b.param, b.shrt, b.full, e});
+                    continue;
+                }
                 // an explicit PS3 texture per template binding (the sky plans' bindmap; '' = a neutral flat texture)
                 if (!e && pe->has_bindmap) {
                     auto bi = std::find_if(pe->bindmap.begin(), pe->bindmap.end(), [&](const auto &x) { return x.first == b.param; });
@@ -1078,12 +1191,53 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                         e = texture_for_short((*own_get(*alt))[k]);
                     }
                 }
+                // a detail-normal slot without a PS3 '-detail' map takes the PS3 material's second normal map (the scrolled
+                // rain-drip / ripple normals of wet walls and floors), which the role rule would leave unbound
+                static const std::regex DETAILN(R"(^g_tNdFetchDetail\dMap$)");
+                if (opt.fixes && !e && role == "detail" && std::regex_search(b.param, DETAILN) && !own_get("detail") &&
+                    own_get("normal") && own_get("normal")->size() >= 2)
+                    e = texture_for_short((*own_get("normal"))[1]);
                 if (!e && role && own_get(*role) && *role != "lightmap") {
                     const size_t k = used_role[*role]++;
                     const auto &v = *own_get(*role);
                     e = texture_for_short(v[std::min(k, v.size() - 1)]);
                 }
+                if (!e && (opt.sky || opt.fixes) && b.param == "g_tNdFetchSharedTexture1Map") {
+                    // a template that reads its transparency from shared texture 1 (and nothing else from it): the PS3
+                    // material's transparency map, else its mask (a colour channel) or its colour map (the alpha channel), else
+                    // opaque white; never
+                    // the donor's own texture (ship-netting / ship-water-stream normals cut nets into windows and decals)
+                    std::string ch;
+                    bool other_use = false;
+                    for (const std::string &f : rec0.feats) {
+                        if (f.rfind("TRANSPARENCY_MAP_USE_SHARED_TEXTURE_1_", 0) == 0) ch = f.substr(f.size() - 1);
+                        else if (has(f, "SHARED_TEXTURE_1") || has(f, "USE_SHARED")) other_use = true;
+                    }
+                    if (!ch.empty() && !other_use) {
+                        if (const auto *t = own_get("trans")) e = texture_for_short((*t)[0]);
+                        else if (const auto *mk = own_get("mask"); mk && ch != "A") e = texture_for_short((*mk)[0]);
+                        else if (const auto *c = own_get("color"); c && ch == "A") e = texture_for_short((*c)[0]);
+                        if (!e) e = flat_texture(std::string("trans"), b.param);
+                    }
+                }
+                if (!e && (opt.sky || opt.fixes) && std::regex_search(b.param, HEIGHTN)) {
+                    // a height (offset-mapping / height-blend) slot: the PS3 '-height' map, else a flat mid grey (no
+                    // parallax); never the donor's own height map
+                    if (const auto *h = own_get("height"); h && used_role["height"] < h->size()) e = texture_for_short((*h)[used_role["height"]++]);
+                    else e = flat_texture(std::string("detail"), b.param);
+                }
+                if (!e && (opt.sky || opt.fixes) && has(b.param, "EnvCube"))   // water.fx's env cube: the level's own PS3 env map
+                    if (const auto *v = own_get("env")) e = texture_for_short((*v)[0]);
                 if ((!e && (!role || *role == "env")) || (!e && has(b.param, "LightMap"))) e = texture_for_full(b.full, b.shrt);
+                if (!e && (opt.sky || opt.fixes) && !detail_layer) {
+                    // a slot left without a PS3 texture of its parameter's role: the role of the template's own texture in
+                    // it (a detail slot holding a normal map, ...) takes the next PS3 texture of that role not used yet
+                    const std::string own_src = std::regex_replace(!b.shrt.empty() ? b.shrt : short_of(b.full), HT2, "");
+                    auto tr = tex_role_final(own_src);
+                    if (tr == "spec") tr = "mask";
+                    if (tr && tr != role && *tr != "lightmap" && *tr != "env" && own_get(*tr) && used_role[*tr] < own_get(*tr)->size())
+                        e = texture_for_short((*own_get(*tr))[used_role[*tr]++]);
+                }
                 if (!e) e = flat_texture((opt.sky || opt.fixes) && detail_layer ? std::optional<std::string>("white") : role, b.param);
                 mw.binds.push_back({b.param, b.shrt, b.full, e});
             }
@@ -1151,10 +1305,27 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
             for (const auto &[k, v] : pe->ps3params)
                 miss = miss || std::none_of(mw.rec.params.begin(), mw.rec.params.end(), [&](const MatParam &mp) { return mp.name == k; });
             if (miss && !pe->exact) approx();
-            // the PS3 material's own constants overwrite the template's
+            // the PS3 material's own constants overwrite the template's; a packed name ('g_fUvScale_fUv2Scale': one float
+            // per part) is matched part by part, so packed PS3 values reach split template slots and the other way round
+            const std::map<std::string, double> parts3 = packed_parts(pe->ps3params);
             for (MatParam &mp : mw.rec.params) {
                 const std::vector<double> *v3 = bg::param(pe->ps3params, mp.name);
-                if (!v3) continue;
+                if (!v3) {
+                    const std::vector<std::string> pn = name_parts(mp.name);
+                    const size_t nold = mp.vals.size() / 4;
+                    Bytes nv;
+                    bool any = false;
+                    for (size_t j = 0; j < nold; j++) {
+                        auto pi = j < pn.size() ? parts3.find(pn[j]) : parts3.end();
+                        if (pi != parts3.end()) {
+                            put32(nv, f32b(pi->second));
+                            any = true;
+                        } else
+                            put32(nv, quiet(rd32le(mp.vals, 4 * j)));
+                    }
+                    if (any) mp.vals = nv;
+                    continue;
+                }
                 const size_t nold = mp.vals.size() / 4;
                 Bytes nv;
                 for (size_t j = 0; j < nold; j++) {
@@ -1163,6 +1334,18 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 }
                 mp.vals = nv;
             }
+        }
+        if (opt.fixes && !pe->exact && rec0.shader == "prime-shader.fx") {
+            // a template's motion the PS3 material does not have stays still: its UV scroll speeds, oscillating UV
+            // distortion and tilt velocities are 0 unless the PS3 material sets that constant itself
+            const std::map<std::string, double> parts3 = packed_parts(pe->ps3params);
+            for (MatParam &mp : mw.rec.params)
+                if (motion_param(mp.name) && !bg::param(pe->ps3params, mp.name) && !parts3.count(mp.name)) {
+                    const size_t nold = mp.vals.size() / 4;
+                    Bytes nv;
+                    for (size_t j = 0; j < nold; j++) put32(nv, f32b(0.0));
+                    mp.vals = nv;
+                }
         }
         if ((opt.sky || opt.fixes)) {
             // a template that draws specular without a spec-map slot: the PS3 spec terms scaled by the PS3 mask mean
@@ -1179,6 +1362,11 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
             if (auto so = soft_override.find(n); so != soft_override.end())
                 for (MatParam &mp : mw.rec.params)
                     if (mp.name == "g_blendSoftness_blendOffset_linearBlendOffset") set_first_float(mp.vals, so->second);
+            // a PS3 overlay pair on a template overlay that scales UV 2: the PS3 program reads f[TEX0].zw unscaled unless
+            // the material sets g_uvScale2 itself (copied above), so the template's own scale becomes 1
+            if (ov_uvscale2.count(n) && !bg::param(pe->ps3params, "g_uvScale2"))
+                for (MatParam &mp : mw.rec.params)
+                    if (mp.name == "g_uvScale2") set_first_float(mp.vals, 1.0);
         }
         matrec[n] = std::move(mw);
     }
@@ -1816,7 +2004,13 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
             isb->u32(f32b(s.mx[0])).u32(f32b(s.mx[1])).u32(f32b(s.mx[2])).u32(f32b(1.0));
         }
         ins.off = instb->size();
-        instb->u32(3).u32(ins.id).ptr(strs, S(ins.proto)).i32(-1).u32(0).u32(0x01010101).u32(1);
+        // +0x18: four per-instance render bytes; PS3 instance word +8 bits 16..19 each clear one of them (byte k = 0
+        // when bit 16 + k is set), the rule of every retail PS4 stage against its PS3 source (44101 instances, no
+        // exception; bit 17 is the common bit of small props, bit 18 of interior pieces)
+        uint32_t ib = 0;
+        for (int k = 0; k < 4; k++)
+            if (!((ins.x8 >> (16 + k)) & 1)) ib |= 1u << (8 * k);
+        instb->u32(3).u32(ins.id).ptr(strs, S(ins.proto)).i32(-1).u32(0).u32(ib).u32(1);
         instb->u32(ins.subs.size()).u32(ins.nj).u64(0).ptr(isb, int64_t(ioff)).ptr(ins.jm);
         instb->raw(Bytes(0x20, 0));
         instb->u32(f32b(ins.mn[0])).u32(f32b(ins.mn[1])).u32(f32b(ins.mn[2])).u32(f32b(1.0));
@@ -2094,11 +2288,13 @@ std::shared_ptr<Blob> convert_light_table(const Pak &p, AutoPages &P, const std:
 // PS3 item {u32 5, u32 n, ptr objects} -> PS4 {u32 5, u32 n, ptr}; object 0xf0 -> 0x108: words 0..19 swapped (w1 =
 // sid of the PS4 material key), +0x50 verts*, +0x58 null, +0x60 idx*, words 23..49, pad, 0, 0, words 51..59, 0; data
 // blocks after the objects (16-aligned, verts then idx): grid water (4-byte texels) raw + 8 swapped u32; mesh water
-// (40-byte vertices, per-word byte orders) + swapped u16 triangle indices.
+// (40-byte vertices, per-word byte orders) + swapped u16 triangle indices. The vertex byte orders are those of every
+// retail PS4 water mesh against its PS3 source (60 paks, 9178 vertices, one order per word): words 0..2 floats, words
+// 3..5, 8, 9 two u16 each, word 6 one u16 then two bytes kept in order, word 7 two bytes kept then one u16.
 std::shared_ptr<Blob> water_blob(const Pak &p, const std::function<std::string(const std::string &)> &matkey) {
     const auto obs = bg::water_objects(p);
     if (obs.empty()) return nullptr;
-    static const char *VPERM[] = {"3210", "3210", "3210", "3210", "1032", "3210", "0123", "0132", "1032", "1032"};
+    static const char *VPERM[] = {"3210", "3210", "3210", "1032", "1032", "1032", "1023", "0132", "1032", "1032"};
     auto B = blob("water");
     B->u32(5).u32(obs.size()).ptr(B, 0x10);
     struct Body {
@@ -2219,8 +2415,12 @@ Bytes paramfix(Bytes d, const Plan &plan) {
         for (char &c : kl) c = char(std::tolower((unsigned char)c));
         const bool frozen = shader != "prime-shader.fx" || kl.find("sky") != std::string::npos || (e && e->exact) || samefile;
         std::set<std::string> own;
-        if (e)
+        if (e) {
             for (const auto &[pk, pv] : e->ps3params) own.insert(pk);
+            // the parts of packed PS3 names and the old shaders' one scroll speed count as set by the PS3 material (the
+            // material writer took their values; g_fTimeScrollX / Y = g_timeScrollU1 / V1)
+            for (const auto &[pk, pv] : packed_parts(e->ps3params)) own.insert(pk);
+        }
         std::string em = n3;
         if (n3.find('/') != std::string::npos) {   // n3.rsplit('/', 2)[-2]
             const size_t a = n3.rfind('/');
@@ -2400,7 +2600,7 @@ Bytes convert_two_pass(const fs::path &ps3, const std::string &lv, const Plan &p
 }  // namespace
 
 Bytes stage_convert(const fs::path &ps3, const Options &o) {
-    Plan plan = make_plan(ps3, o.res, o.fixes ? o.water_templates : fs::path(), o.exclude);   // fixes: water templates scored (batch98)
+    Plan plan = make_plan(ps3, o.res, o.fixes ? o.water_templates : fs::path(), o.exclude, o.fixes ? o.pak_dir : fs::path());   // fixes: water templates scored (batch98)
     const std::string lv = plan.stage;
     if (o.plan_summary) {
         size_t ne = 0;
@@ -2532,7 +2732,63 @@ std::vector<std::string> slash_parts(const std::string &s) {
     return v;
 }
 
+// every retail sky-clouds.fx material (the retail sky paks 'sky-*.pak'): pak, key ('dir/file:variant'), its parameter
+// names and its binding names. A sky-clouds.fx material's feature set (its EFFECT permutation) shows in exactly the
+// parameters it carries, so a retail material with the PS3 material's parameter set has the PS3 sky's features.
+struct SkyTemplate {
+    std::string pak, key;
+    std::set<std::string> params, binds;
+    uint32_t nfeat = 0;   // its feature count: features without parameters (e.g. ND_CLOUD_SKY_COLOR_LAYER_1) leave the set unchanged
+};
+std::mutex g_sky_tmpl_lock;
+std::map<std::string, std::vector<SkyTemplate>> g_sky_tmpl;
+const std::vector<SkyTemplate> &retail_sky_templates(const fs::path &pak_dir) {
+    std::lock_guard<std::mutex> lock(g_sky_tmpl_lock);
+    auto [it, fresh] = g_sky_tmpl.try_emplace(utf8(pak_dir));
+    if (!fresh) return it->second;
+    std::vector<std::string> names;
+    for (const auto &e : fs::directory_iterator(pak_dir)) {
+        const std::string fn = utf8(e.path().filename());
+        if (starts_with(fn, "sky-") && ends_with(fn, ".pak") && !ends_with(fn, "-ingame12.pak")) names.push_back(fn);
+    }
+    std::sort(names.begin(), names.end());
+    for (const std::string &fn : names) {
+        const Pak q(pak_dir / upath(fn));
+        for (const PakItem &g : q.items_of("GEOMETRY_1")) {
+            const uint64_t n = q.u64(q.pbase(g.page) + g.data_off() + 0x48);
+            const ORef r = bg::res(q, g.page, g.data_off() + 0x50);
+            if (!r) continue;
+            auto str = [&](uint32_t pg, uint64_t off) {
+                const ORef s = bg::res(q, pg, off);
+                return s ? q.pstr(s->first, s->second) : std::string();
+            };
+            for (uint64_t i = 0; i < n; i++) {
+                const uint64_t o = r->second + i * 0x48, mb = q.pbase(r->first) + o;
+                if (str(r->first, o + 8) != "sky-clouds.fx") continue;
+                SkyTemplate t;
+                t.pak = fn;
+                const std::string name = str(r->first, o);
+                t.key = name.substr(0, name.find(','));
+                const uint32_t np = rd32le(q.d, mb + 0x34), nb = rd32le(q.d, mb + 0x38);
+                t.nfeat = rd32le(q.d, mb + 0x30);
+                if (const ORef pr = bg::res(q, r->first, o + 0x20))
+                    for (uint32_t k = 0; k < np; k++) t.params.insert(str(pr->first, pr->second + 0x18 * k));
+                if (const ORef br = bg::res(q, r->first, o + 0x28))
+                    for (uint32_t k = 0; k < nb; k++) t.binds.insert(str(br->first, br->second + 0x28 * k));
+                it->second.push_back(std::move(t));
+            }
+        }
+    }
+    return it->second;
+}
+
 }  // namespace
+
+bool sky_level(const std::string &lv) {
+    for (const SkyMapEntry &e : sky_map())
+        if (e.lv == lv) return true;
+    return false;
+}
 
 Bytes sky_convert(const fs::path &ps3, const std::string &lv, const Options &o, const fs::path &water_templates) {
     Plan P = make_plan(ps3, o.res, water_templates);
@@ -2559,7 +2815,28 @@ Bytes sky_convert(const fs::path &ps3, const std::string &lv, const Options &o, 
             auto pi = std::find_if(P.mats.begin(), P.mats.end(), [&](const auto &x) { return x.first == m->name; });
             if (pi == P.mats.end()) throw Stop("KeyError: " + m->name);
             PlanMat &pe = pi->second;
-            const auto &t = sky_templates().at(e.t);
+            std::pair<std::string, std::string> t = sky_templates().at(e.t);
+            {   // the template: a retail sky-clouds.fx material with the PS3 material's features (the same parameter set,
+                // PS3-only terms such as g_fError aside) and the same binding slots; the mapped template when it is one
+                // of them or when retail has none (e.g. warzone: sky-colombia-night, which has its sun; ldn-streets:
+                // sky-grave-01-firstyard, without the cloud-brightness term the PS3 sky lacks)
+                const std::vector<SkyTemplate> &R = retail_sky_templates(o.pak_dir);
+                std::set<std::string> known, want, slots;
+                for (const SkyTemplate &x : R) known.insert(x.params.begin(), x.params.end());
+                const auto pp = bg::all_material_params(p);
+                if (auto q = pp.find(m->name); q != pp.end())
+                    for (const auto &[k, v] : q->second)
+                        if (known.count(k)) want.insert(k);
+                for (const auto &[b, i] : e.bm)
+                    if (size_t(i) < sh.size()) slots.insert(b);
+                const SkyTemplate *exact = nullptr, *mapped = nullptr;
+                for (const SkyTemplate &x : R) {
+                    if (x.params != want || x.binds != slots) continue;
+                    if (x.pak == t.first && x.key == t.second) mapped = &x;
+                    if (!exact || x.nfeat < exact->nfeat) exact = &x;   // the fewest features: none the PS3 sky shows no sign of
+                }
+                if (!mapped && exact) t = {exact->pak, exact->key};
+            }
             pe.key = t.second;
             pe.pak = t.first;
             pe.exact = false;
@@ -2582,6 +2859,9 @@ Bytes sky_convert(const fs::path &ps3, const std::string &lv, const Options &o, 
     for (const auto &[n, e] : P.mats)
         if (!e.has_bindmap) {
             need.push_back({e.pak, e.key});
+            paks.insert(e.pak);
+        } else if (std::none_of(B.mats.begin(), B.mats.end(), [&](const auto &x) { return x.first == std::make_pair(e.pak, e.key); })) {
+            need.push_back({e.pak, e.key});   // a sky template outside the shared bundle (the exact-feature rule)
             paks.insert(e.pak);
         }
     if (!need.empty()) {

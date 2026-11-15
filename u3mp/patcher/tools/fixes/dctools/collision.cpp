@@ -286,8 +286,14 @@ Bytes build_bvcm(const std::vector<std::array<V3, 3>> &tris, const std::vector<u
         srec(std::vector<size_t>(ids.begin(), ids.begin() + std::ptrdiff_t(h)));
         srec(std::vector<size_t>(ids.begin() + std::ptrdiff_t(h), ids.end()));
     };
-    std::vector<size_t> all(N);
-    std::iota(all.begin(), all.end(), 0);
+    // sky (every stage / sky row): a degenerate triangle (two corners on one merged vertex) has no area and is dropped,
+    // as Havok's tools do (retail has none). Written as a primitive it has index0 == index1 or index1 == index2 ==
+    // index3, which Havok reads as a CUSTOM primitive.
+    std::vector<size_t> all;
+    for (size_t t = 0; t < N; t++)
+        if (!sky || (tv[t][0] != tv[t][1] && tv[t][1] != tv[t][2] && tv[t][0] != tv[t][2])) all.push_back(t);
+    if (all.empty()) throw Stop("ValueError: no collision triangle with an area");
+    const size_t NK = all.size();   // primitive keys
     srec(all);
     F3 dmin, dmax;
     for (int c = 0; c < 3; c++) {
@@ -408,18 +414,6 @@ Bytes build_bvcm(const std::vector<std::array<V3, 3>> &tris, const std::vector<u
         for (size_t t : ids) {
             size_t a[3];
             for (int k = 0; k < 3; k++) a[k] = lidx.at(tv[t][k]);
-            if (sky) {
-                // Havok reads a primitive with index0 == index1, or index1 == index2 == index3, as CUSTOM (an assert in game):
-                // a degenerate triangle (a,a,c) is written (a,c,a), (a,b,b) as (b,b,a)
-                if (a[0] == a[1]) {
-                    if (a[2] != a[0]) a[1] = a[2], a[2] = a[0];
-                    else a[1] = a[0] == 0 ? 1 : 0, a[2] = a[0];
-                }
-                if (a[1] == a[2]) {
-                    if (a[0] != a[1]) { const size_t x = a[0]; a[0] = a[1]; a[1] = a[2]; a[2] = x; }
-                    else a[1] = a[0] == 0 ? 1 : 0, a[2] = a[0];
-                }
-            }
             if (a[0] > 255 || a[1] > 255 || a[2] > 255) throw Stop("ValueError: bytes must be in range(0, 256)");
             prims.push_back({uint8_t(a[0]), uint8_t(a[1]), uint8_t(a[2]), uint8_t(a[2])});
             F3 mn, mx;
@@ -515,7 +509,7 @@ Bytes build_bvcm(const std::vector<std::array<V3, 3>> &tris, const std::vector<u
     set32(D, 0x7c, fbits(1.0f));
     int bl = 0;
     for (uint64_t k = maxkey; k; k >>= 1) bl++;
-    set32(D, 0x80, uint32_t(N));
+    set32(D, 0x80, uint32_t(NK));
     set32(D, 0x84, uint32_t(std::max(1, bl)));
     set32(D, 0x88, uint32_t(maxkey));
     const size_t secbase = D.size();

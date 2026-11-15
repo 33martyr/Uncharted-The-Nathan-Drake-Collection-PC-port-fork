@@ -1528,9 +1528,97 @@ Converter::Converter(const std::vector<std::string> &schemas) : p(std::make_uniq
 }
 Converter::~Converter() = default;
 
+// A render-settings module (render-settings/game/<level>.bin): symbols that each name one flat 'render-settings'
+// struct (type 0x9ec73b22) of 766 PS3 words, no pointers in it. The PS4 struct has 788 words: the PS3 words in the
+// same order with 22 PS4-only words inserted (465..471, 507, 630, 636..640, 646, 647, 782..787), which hold the same
+// value in every retail struct. Learned from the 757 retail structs of the 228 disc modules the PS4 Collection ships:
+// this layout reproduces every one of them byte for byte. The learned schema got the zero runs around word 465 wrong
+// (the 'tint-rgbi' block lost its values and took (-0, 0.02, 0.02) from a template) and dropped whole structs.
+std::optional<Bytes> convert_render_settings(const Bytes &d3) {
+    constexpr uint32_t RS = 0x9ec73b22;
+    constexpr size_t N3 = 766, N4 = 788;
+    if (d3.size() < 0x18 || std::memcmp(d3.data(), "DC00", 4)) return std::nullopt;
+    const uint32_t reloc = be32(d3, 8), n = be32(d3, 0x14);
+    if (be32(d3, 0xc) || !n || 0x18 + 12ull * n > d3.size() || reloc + 4ull > d3.size()) return std::nullopt;
+    const uint32_t nbm3 = be32(d3, reloc);   // PS3 relocation bitmap: bit 7 - k of byte i marks the 4-byte word 8i + k
+    if (reloc + 4ull + nbm3 > d3.size()) return std::nullopt;
+    struct S3 {
+        uint32_t sid, off;
+    };
+    std::vector<S3> syms;
+    for (uint32_t i = 0; i < n; i++) {
+        const uint64_t o = 0x18 + 12ull * i;
+        if (be32(d3, o + 4) != RS) return std::nullopt;
+        const uint32_t off = be32(d3, o + 8);
+        if (off < 4 || off + 4 * N3 > reloc || be32(d3, off - 4) != RS) return std::nullopt;
+        syms.push_back({be32(d3, o), off});
+    }
+    std::set<uint64_t> want, got;   // the only pointers: the symbol table's
+    for (uint32_t i = 0; i < n; i++) want.insert(0x18 + 12ull * i + 8);
+    for (uint32_t bi = 0; bi < nbm3; bi++)
+        for (int k = 0; k < 8; k++)
+            if (d3[reloc + 4 + bi] & (1 << k)) got.insert((uint64_t(bi) * 8 + uint64_t(7 - k)) * 4);
+    if (want != got) return std::nullopt;
+    std::vector<uint32_t> order(n);   // objects in file order
+    std::iota(order.begin(), order.end(), 0u);
+    std::stable_sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) { return syms[x].off < syms[y].off; });
+    auto m4 = [](size_t k) -> size_t {
+        if (k < 465) return k;
+        if (k < 500) return k + 7;
+        if (k < 622) return k + 8;
+        if (k < 627) return k + 9;
+        if (k < 632) return k + 14;
+        return k + 16;
+    };
+    std::array<uint32_t, N4> extra{};   // the PS4-only words (retail: the same in every struct)
+    extra[630] = 0x3f800000;            // 1.0f
+    extra[637] = 0x3f8ccccd;            // 1.1f
+    extra[638] = 0x3d8f5c29;            // 0.07f
+    extra[639] = 1;
+    extra[640] = 1;
+    Bytes out(0x18 + 16ull * n, 0);
+    std::memcpy(out.data(), "00CD", 4);
+    wr32le(&out[4], be32(d3, 4));
+    wr32le(&out[0x10], be32(d3, 0x10));
+    wr32le(&out[0x14], n);
+    std::vector<uint64_t> start(n);
+    for (uint32_t i : order) {
+        const uint64_t s = (out.size() + 8 + 15) & ~uint64_t(15);
+        out.resize(s, 0);
+        wr32le(&out[s - 4], RS);   // type header [u32 0][u32 type]
+        start[i] = s;
+        out.resize(s + 4 * N4, 0);
+        std::array<uint32_t, N4> w = extra;
+        for (size_t k = 0; k < N3; k++) w[m4(k)] = be32(d3, syms[i].off + 4 * k);
+        for (size_t k = 0; k < N4; k++) wr32le(&out[s + 4 * k], w[k]);
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        const uint64_t o = 0x18 + 16ull * i;
+        wr32le(&out[o], syms[i].sid);
+        wr32le(&out[o + 4], RS);
+        wr64le(&out[o + 8], start[i]);
+    }
+    const uint64_t rl = out.size();
+    wr64le(&out[8], rl);
+    const uint64_t nbm = (rl + 63) / 64;
+    Bytes bm(nbm, 0);
+    for (uint32_t i = 0; i < n; i++) {
+        const uint64_t wd = (0x18 + 16ull * i + 8) / 8;
+        bm[wd / 8] |= uint8_t(1 << (wd % 8));
+    }
+    for (int k = 0; k < 4; k++) out.push_back(uint8_t(uint32_t(nbm) >> (8 * k)));
+    out.insert(out.end(), bm.begin(), bm.end());
+    return out;
+}
+
 Bytes Converter::convert(const Bytes &d3, Counts *rep_) const {
     Counts own;
     Counts &rep = rep_ ? *rep_ : own;
+    if (!g_u2)
+        if (auto rs = convert_render_settings(d3)) {
+            rep["render-settings"]++;
+            return *rs;
+        }
     const Mod m(d3);
     if (!m.be) throw Stop("ValueError: input is not a PS3 module");
     const Impl &I = *p;

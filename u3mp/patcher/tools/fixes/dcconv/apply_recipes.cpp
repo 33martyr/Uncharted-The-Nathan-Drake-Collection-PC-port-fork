@@ -158,6 +158,10 @@ int dc_recipes(const std::vector<std::string> &argv) {
         const std::string &key = kv->first;
         const json::Value &rec = kv->second;
         if (!only.empty() && key.find(only) == std::string::npos) continue;
+        if (key.find("/dc1/ps4/render-settings/") != std::string::npos) {   // convert-dc1 makes these exactly (dcconv render-settings rule)
+            count("render-settings (convert-dc1)");
+            continue;
+        }
         const size_t sl = key.find('/');
         const fs::path dst = upath(project + "/work/" + key.substr(0, sl) + "/u3data/build/main/" + key.substr(sl + 1));
         const std::string want = rec.get("sha256")->s;

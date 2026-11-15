@@ -542,6 +542,26 @@ void read_materials(const Pak &p, std::vector<Material3> &out, std::vector<Textu
         } catch (const std::exception &) {
             exact.clear();
         }
+        // the render state of the technique passes (U3): a pass node whose state word (+0x20) has bit 0x04000000 alpha-tests
+        // (0x84807f00 / 0x85807f00: test on, reference 0x7f in bits 8..15); opaque passes are 0x81800000 / 0x80800000,
+        // blended ones 0xf0800000 / 0xf1800000. A texture named -trans / -alpha does not make a material alpha-tested:
+        // London's graffiti and paint walls carry an opaque overlay layer with its own -alpha mask (state 0x81800000)
+        if (!g_u2) try {
+            const ORef pl = res(p, m.first, m.second + 0x10);
+            for (uint32_t k = 0; k < (pl ? 8u : 0u); k++) {
+                const ORef r = res(p, pl->first, pl->second + 4 * k);
+                const ORef nd = r ? res(p, r->first, r->second + 0x10) : std::nullopt;
+                if (!nd) continue;
+                if (mat.alpha_test < 0) mat.alpha_test = 0;
+                if (p.pu32(nd->first, nd->second + 0x20) & 0x04000000u) mat.alpha_test = 1;
+                // the first pass node blends (bit 0x02000000: 0xf2800000 / 0xf3800000): the material draws alpha-blended. Retail
+                // PS4 agrees on every exact twin: a pass-0 blend bit is TRANSPARENCY_ALPHA_BLEND, no bit never is
+                if (k == 0) mat.blend = (p.pu32(nd->first, nd->second + 0x20) & 0x02000000u) ? 1 : 0;
+            }
+        } catch (const std::exception &) {
+            mat.alpha_test = -1;
+            mat.blend = -1;
+        }
         if (!exact.empty()) mat.textures = exact;
         else {
             mat.textures = idx;
@@ -635,8 +655,19 @@ std::map<std::string, Params> all_material_params(const Pak &p) {
         const Ref n = need(p, m.first, m.second);
         mats.push_back({p.pstr(n.first, n.second), m});
     }
-    // a pass run is not terminated where the material's entries end: a node reached at entry > 0 that is another
-    // material's entry-0 (own) node is skipped
+    // Uncharted 3: a pass pointer names its own program at entry 0; the entries after it in memory are the program lists
+    // of other passes and other materials (their scroll, flow, tint and glow constants made rocks, walls and tents
+    // scroll or glow), so only entry-0 programs count. Uncharted 2 (not checked): a pass run is not terminated where the
+    // material's entries end; a node reached at entry > 0 that is another material's entry-0 (own) node is skipped.
+    if (!g_u2) {
+        for (const auto &[n, m] : mats) {
+            Params out;
+            for (const WalkNode &w : walk_passes(p, m))
+                if (w.e == 0) node_params(p, w.node, out);
+            res_[n] = out;
+        }
+        return res_;
+    }
     std::map<std::string, std::vector<WalkNode>> W;
     std::map<Ref, std::set<std::string>> own;
     for (const auto &[n, m] : mats) {

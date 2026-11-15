@@ -482,7 +482,21 @@ std::map<int64_t, B> root_words(const B &r3, int n4, int n5, int n6, int n8, int
         if (o + 4 > int64_t(r3.size())) throw Stop("struct.error: unpack_from requires a buffer of at least 4 bytes");
         return be32(r3, size_t(o));
     };
-    const uint64_t x = u32b(0x28), bf28 = (x & 0x7fff) | ((x & ~uint64_t(0x7fff)) << 2);
+    // +0x04: the PS3 root byte 0xb0 (the emitter's draw class: 0 glow / fog / sound, 2 smoke and flames, 3 additive fire,
+    // 4 distortion; equal in all 1824 PS3 / PS4 emitter pairs). It was a constant 0, so converted fire, smoke and heat
+    // haze drew in the plain class: white flames and white blobs.
+    out[0x004] = B{r3.at(0xb0), 0, 0, 0};
+    // +0x40: the PS3 flag word +0x28 with its bits moved to their PS4 places, learned from the same pairs (every set
+    // PS4 bit is explained; PS3 bits 4, 21, 22 have no PS4 bit). Bits no pair has set keep the old rule (below bit 15 in
+    // place, from bit 15 on two up).
+    static const int BIT28[32] = {0, 1, 3, 4, -1, 5, 6, 8, 10, -2, 12, 13, 14, 15, -2, 17, 18, 19, 20, 21, 22, -1, -1, 24, 25, 29, 30, -2, -2, -2, -2, -2};
+    const uint64_t x = u32b(0x28);
+    uint64_t bf28 = 0;
+    for (int b = 0; b < 32; b++)
+        if (x >> b & 1) {
+            const int to = BIT28[b] == -2 ? (b < 15 ? b : b + 2) : BIT28[b];
+            if (to >= 0) bf28 |= uint64_t(1) << to;
+        }
     if (bf28 > 0xffffffffu) throw Stop("struct.error: 'I' format requires 0 <= number <= 4294967295");
     out[0x040] = le(bf28, 4);
     out[0x04c] = B{r3.at(0x30), 2, 0, 0};
@@ -675,9 +689,12 @@ std::vector<std::vector<std::string>> read_tsv(const fs::path &p) {
     return rows;
 }
 
+// add_new (the general 1.19 rule, append119 below): an emitter with no name in emitter-names.tsv gets the name
+// 'u3mp-ps3/<sid>' (the game finds emitters and groups by the symbol table's string id; the name is a label), and a group
+// the PS4 module lacks gets a copy of the module's first group root with its own name, count and list
 B build48(const std::string &mod, const std::vector<uint32_t> &groups, const B &base_bytes, const B &ps3_bytes, const std::map<uint32_t, std::string> &names,
           const std::vector<std::pair<std::string, std::vector<std::pair<std::string, int64_t>>>> &mat, const std::map<uint32_t, DonorMap> &s11,
-          std::vector<std::string> &log) {
+          std::vector<std::string> &log, bool add_new = false) {
     const DC c = load_dc2(base_bytes);
     B d = sl(c.d, 0, int64_t(c.reloc));
     std::set<int64_t> ptrs;
@@ -702,17 +719,28 @@ B build48(const std::string &mod, const std::vector<uint32_t> &groups, const B &
         const int64_t o3 = int64_t(a.bysid.at(s).second);
         const In3 in = ps3_inputs(A, o3);
         auto nm = names.find(s);
-        if (nm == names.end()) throw Stop(u3::fmt("KeyError: emitter %08x of ", s) + mod + " has no name in emitter-names.tsv");
-        const std::string &name = nm->second;
-        if (sid_of(name) != s) throw Stop("AssertionError: " + name);
+        if (nm == names.end() && !add_new) throw Stop(u3::fmt("KeyError: emitter %08x of ", s) + mod + " has no name in emitter-names.tsv");
+        const std::string name = nm != names.end() ? nm->second : u3::fmt("u3mp-ps3/%08x", s);
+        if (nm != names.end() && sid_of(name) != s) throw Stop("AssertionError: " + name);
         const std::string key = u3::fmt("%02x%02x%02x%02x", in.r3[0x34], in.r3[0x35], in.r3[0x36], in.r3[0x37]);
         auto mk = std::find_if(mat.begin(), mat.end(), [&](const auto &x) { return x.first == key; });
+        if (mk == mat.end() && add_new) {   // (the general rule: an emitter the converter cannot place is left out of its groups)
+            log.push_back(u3::fmt("%s emitter %08x skipped: PS3 material %s is not in mattab.tsv", mod.c_str(), s, key.c_str()));
+            continue;
+        }
         if (mk == mat.end()) throw Stop("KeyError: PS3 material " + key + " of emitter " + name + " is not in mattab.tsv");
         const auto *best = &mk->second[0];
         for (const auto &kv : mk->second)
             if (kv.second > best->second) best = &kv;
         const uint32_t m4 = uint32_t(std::stoul(best->first, nullptr, 16));
-        const Emitter em = convert_emitter(in, m4, s, s11);
+        Emitter em;
+        try {
+            em = convert_emitter(in, m4, s, s11);
+        } catch (const std::exception &ex) {
+            if (!add_new) throw;
+            log.push_back(u3::fmt("%s emitter %08x skipped: %s", mod.c_str(), s, ex.what()));
+            continue;
+        }
         const int64_t name_addr = int64_t(d.size());
         d.insert(d.end(), name.begin(), name.end());
         d.push_back(0);
@@ -730,16 +758,42 @@ B build48(const std::string &mod, const std::vector<uint32_t> &groups, const B &
     std::map<uint32_t, size_t> symd;
     for (size_t i = 0; i < syms.size(); i++) symd[syms[i].s] = i;
     for (uint32_t g : groups) {
-        const auto [t, og0] = c.bysid.at(g);
+        const bool fresh = !c.bysid.count(g);
+        if (fresh && !add_new) throw Stop(u3::fmt("KeyError: group %08x of ", g) + mod);
+        uint64_t og0 = 0;
+        uint32_t t = 0x77589471;
+        if (!fresh) std::tie(t, og0) = c.bysid.at(g);
+        else
+            for (const auto &s : c.syms)   // a new group: the root of the module's first group
+                if (s.t == 0x77589471 && c.u32(int64_t(s.o) + 0x54) == 0x05dcdf85 && c.u32(int64_t(s.o) + 0x58) == 1) {
+                    og0 = s.o;
+                    break;
+                }
+        if (fresh && !og0) throw Stop("AssertionError: no group root to copy in " + mod);
         const int64_t og = int64_t(og0);
         const int64_t o3 = int64_t(a.bysid.at(g).second), x = int64_t(a.ptr(o3 + 0x18));
-        const uint32_t n = a.u32(o3 + 0xc);
+        uint32_t n = a.u32(o3 + 0xc);
         std::vector<uint32_t> lst;
         for (uint32_t i = 0; i < n; i++) lst.push_back(a.u32(x + 4 * int64_t(i)));
         std::set<uint32_t> all;
         for (const auto &s : syms) all.insert(s.s);
+        if (add_new) {   // emitters left out above are not listed
+            lst.erase(std::remove_if(lst.begin(), lst.end(), [&](uint32_t e) { return !all.count(e); }), lst.end());
+            n = uint32_t(lst.size());
+            if (!n) {
+                log.push_back(u3::fmt("%s group %08x skipped: none of its emitters converts", mod.c_str(), g));
+                continue;
+            }
+        }
         for (uint32_t e : lst)
             if (!all.count(e)) throw Stop(u3::fmt("AssertionError: %#x", e));
+        int64_t gname = -1;
+        if (fresh) {
+            const std::string nm = u3::fmt("u3mp-ps3/%08x", g);
+            gname = int64_t(d.size());
+            d.insert(d.end(), nm.begin(), nm.end());
+            d.push_back(0);
+        }
         const B rootb = sl(c.d, og, og + 0x58);
         if (c.u32(og + 0x54) != 0x05dcdf85 || c.u32(og + 0x58) != 1) throw Stop("AssertionError: group root");
         align(16, 8);
@@ -766,10 +820,15 @@ B build48(const std::string &mod, const std::vector<uint32_t> &groups, const B &
             ptrs.insert(slot);
         }
         ptrs.insert(gb);   // the name pointer copied from retail (an absolute offset into the same module)
-        syms[symd.at(g)] = {g, t, uint64_t(gb)};
+        if (fresh) {
+            putle(d, gb, uint64_t(gname), 8);
+            syms.push_back({g, t, uint64_t(gb)});
+            symd[g] = syms.size() - 1;
+        } else
+            syms[symd.at(g)] = {g, t, uint64_t(gb)};
         std::string ls;
         for (uint32_t e : lst) ls += (ls.empty() ? "" : " ") + u3::fmt("%08x", e);
-        log.push_back(u3::fmt("%s group %08x: count %u -> %u, list %s", mod.c_str(), g, c.u32(og + 0x10), n, ls.c_str()));
+        log.push_back(u3::fmt("%s group %08x: %s %u, list %s", mod.c_str(), g, fresh ? "new (root copied), count" : u3::fmt("count %u ->", c.u32(og + 0x10)).c_str(), n, ls.c_str()));
     }
     return build_dc2(d, ptrs, syms, c.syms.size());
 }
@@ -787,7 +846,7 @@ int part_modules(const std::vector<std::string> &argv) {
     const fs::path job = upath(a.need("--job"));
     static const char *BATCH45_MD5 = "c77a9e0cb983d9ca2072b561565aa537";
     static const std::vector<std::pair<std::string, std::string>> EXPECT = {
-        {"part-cave-multi", "9c9d7dad7bcc21df44cdf6707cec394a"}, {"part-gompa-multi", "e9c4ea7542f5965f019a6105925e235f"}, {"part-shambhala-multi", "3e843674e8996bc1ff018040cbd91038"}};
+        {"part-cave-multi", "9c9d7dad7bcc21df44cdf6707cec394a"}, {"part-gompa-multi", "42594391eae33a9a3dc24bb98a7df58c"}, {"part-shambhala-multi", "33184d353df478eb8d53fc2d3838511f"}};
     const auto t0 = std::chrono::steady_clock::now();
     const fs::path main4 = upath(ps4d) / "u3data" / "build" / "main" / "dc2" / "part-module";
     Ps3Index idx(disc, upd, "");
@@ -896,27 +955,78 @@ int part_modules(const std::vector<std::string> &argv) {
             else v->second = std::stoll(r.at(2));
         }
         for (const auto &[mod, groups] : GROUPS) outs[mod] = build48(mod, groups, mod == "part-gompa-multi" ? g45 : p4.at(mod), p3.at(mod), names, mat, s11, log);
+        int bad48 = 0;
+        for (const auto &[m, h] : EXPECT) {
+            const std::string got = md5_hex(outs[m]);
+            if (got != h) bad48++;
+            log.push_back(u3::fmt("batch48 %s.bin  md5 %s  %s", m.c_str(), got.c_str(), got == h ? "OK" : ("MISMATCH, expected " + h).c_str()));
+        }
+        if (bad48) {
+            for (const std::string &l : log) std::printf("%s\n", l.c_str());
+            differ_note("inputs that differ from the reference copies: ");
+            std::printf("FAILED: %d of 3 batch48 part modules do not match the reference md5; nothing written\n", bad48);
+            return 1;
+        }
+        // the general 1.19 rule: every PS3 part module (its newest layer; test modules aside) whose effects the PS4 module
+        // (the batch48 result, else retail) lacks or lists otherwise: the PS3 group lists, with every missing emitter
+        // converted and appended. The PS3 1.19 update added emitters and whole effects (Fort co-op adventure: 18 groups the
+        // co-op script ss-coop-adv-fort and the level spawners use; the MP module's group 386790d4 that net.bin uses; Cave,
+        // Shambhala, Gompa, Ruins, obj-shade) that the PS4 modules, made from an older build, do not have
+        for (const std::string &rel : idx.names()) {
+            if (rel.rfind("dc1/ps4/part-", 0) != 0 || rel.size() < 4 || rel.compare(rel.size() - 4, 4, ".bin") || rel.find('/', 8) != std::string::npos) continue;
+            const std::string m = rel.substr(8, rel.size() - 12);
+            if (m.find("test") != std::string::npos) continue;
+            const auto b3 = idx.read(rel);
+            const fs::path p4f = main4 / upath(m + ".bin");
+            if (!b3 || (!outs.count(m) && !fs::exists(p4f))) continue;
+            const B base = outs.count(m) ? outs.at(m) : read_file(p4f);
+            const DC a3(*b3);
+            const DC c4 = load_dc2(base);
+            std::vector<uint32_t> groups;
+            for (const auto &s : a3.syms) {
+                if (s.t != 0x77589471) continue;
+                const int64_t o3 = int64_t(s.o), x3 = int64_t(a3.ptr(o3 + 0x18));
+                std::vector<uint32_t> l3, l4;
+                for (uint32_t i = 0; i < a3.u32(o3 + 0xc); i++) l3.push_back(a3.u32(x3 + 4 * int64_t(i)));
+                if (auto it = c4.bysid.find(s.s); it != c4.bysid.end()) {
+                    const int64_t o4 = int64_t(it->second.second), x4 = int64_t(c4.ptr(o4 + 0x28));
+                    for (uint32_t i = 0; i < c4.u32(o4 + 0x10); i++) l4.push_back(c4.u32(x4 + 4 * int64_t(i)));
+                }
+                if (l3 != l4) groups.push_back(s.s);
+            }
+            if (groups.empty()) continue;
+            std::sort(groups.begin(), groups.end());
+            outs[m] = build48(m, groups, base, *b3, names, mat, s11, log, true);
+        }
     } catch (const std::exception &ex) {
         std::printf("FAILED: %s\n", ex.what());
         differ_note("inputs that differ from the reference copies: ");
         return 1;
     }
     for (const std::string &l : log) std::printf("%s\n", l.c_str());
+    // the final modules and their reference md5 (append119.tsv: module, md5)
+    std::vector<std::pair<std::string, std::string>> fin;
+    for (const auto &r : read_tsv(job / "append119.tsv")) fin.push_back({r.at(0), r.at(1)});
     int bad = 0;
-    for (const auto &[m, h] : EXPECT) {
-        const std::string got = md5_hex(outs[m]);
+    for (const auto &[m, h] : fin) {
+        const std::string got = outs.count(m) ? md5_hex(outs[m]) : "-";
         if (got != h) bad++;
-        std::printf("%s.bin  md5 %s  %s  (%zu bytes)\n", m.c_str(), got.c_str(), got == h ? "OK" : ("MISMATCH, expected " + h).c_str(), outs[m].size());
+        std::printf("%s.bin  md5 %s  %s  (%zu bytes)\n", m.c_str(), got.c_str(), got == h ? "OK" : ("MISMATCH, expected " + h).c_str(), outs.count(m) ? outs[m].size() : 0);
     }
+    for (const auto &[m, b] : outs)
+        if (std::none_of(fin.begin(), fin.end(), [&](const auto &x) { return x.first == m; })) {
+            bad++;
+            std::printf("%s.bin  md5 %s  not in append119.tsv\n", m.c_str(), md5_hex(b).c_str());
+        }
     if (bad) {
         differ_note("inputs that differ from the reference copies: ");
-        std::printf("FAILED: %d of 3 part modules do not match the reference md5; nothing written\n", bad);
+        std::printf("FAILED: %d part modules do not match the reference md5; nothing written\n", bad);
         return 1;
     }
     differ_note("note: some inputs differ from the reference copies, the outputs still match: ");
     const fs::path dest = a.val.count("--dest") ? upath(a.get("--dest", "")) : upath(project) / "work" / "overlay-r3" / "u3data" / "build" / "main" / "dc2" / "part-module";
     int written = 0, already = 0;
-    for (const auto &[m, h] : EXPECT) {
+    for (const auto &[m, h] : fin) {
         const fs::path p = dest / upath(m + ".bin");
         if (fs::exists(p) && md5_hex(read_file(p)) == h) {
             already++;
@@ -937,7 +1047,7 @@ int part_modules(const std::vector<std::string> &argv) {
     }
     std::printf("part modules: %d written, %d already at the reference md5%s  (%.1f s)\n", written, already, a.has("--apply") ? "" : " (dry run, nothing written)",
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
-    std::printf("convert-dc2-part-modules: 3/3 md5 OK\n");
+    std::printf("convert-dc2-part-modules: %zu/%zu md5 OK\n", fin.size(), fin.size());
     return 0;
 }
 

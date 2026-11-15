@@ -99,8 +99,10 @@ int convert_dc1(const std::vector<std::string> &argv) {
         };
         if (fs::exists(dst)) {
             // present: this step's own output or a later fix of it (enemy-stall / coop-audit patch these in place)
-            const bool at = sha_file(dst) == want;
-            if (at || !a.has("--force-files")) {
+            // a render-settings module is never patched later: one at another hash is an older converter's (dc-recipes
+            // until recipe 1.20, with the wrong tint block) and is replaced
+            const bool at = sha_file(dst) == want, rs = rel4.find("/render-settings/") != std::string::npos && state == "identical";
+            if (at || (!a.has("--force-files") && !rs)) {
                 count(at ? "already" : "present-kept");
                 if (a.has("--apply")) put_dci(size_t(fs::file_size(dst)));
                 continue;

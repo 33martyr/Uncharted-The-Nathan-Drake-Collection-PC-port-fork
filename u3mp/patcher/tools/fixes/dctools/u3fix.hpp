@@ -40,6 +40,7 @@ std::vector<std::string> py_splitlines(const std::string &s);
 int remove_lab(const std::vector<std::string> &argv);         // tools/fixes/no-lab/remove_lab.cpp
 int hud_mod_mips(const std::vector<std::string> &argv);       // tools/fixes/hud-mod-mips/limit_mod_mips.cpp
 int remove_rpcn_page(const std::vector<std::string> &argv);   // tools/fixes/no-rpcn-menu/remove_rpcn_page.cpp
+int world_levels(const std::vector<std::string> &argv);       // tools/fixes/world-levels/world_levels.cpp
 int netgame_order(const std::vector<std::string> &argv);      // tools/fixes/netgame-order/netgame_order.cpp
 int emblem_cap3(const std::vector<std::string> &argv);        // tools/fixes/wall-emblem-test/emblem_cap3.cpp
 int eula_box(const std::vector<std::string> &argv);           // tools/fixes/dctools/eula_box.cpp

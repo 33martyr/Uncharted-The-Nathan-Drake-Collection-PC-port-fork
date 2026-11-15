@@ -3,6 +3,7 @@
 //   u3fix <step> [options]
 //     remove-lab        --project P [--actors lab_actors.txt] [--apply]       (tools/fixes/no-lab)
 //     remove-rpcn-page  --project P [--apply]                                 (tools/fixes/no-rpcn-menu)
+//     world-levels      --project P [--ps4 D] [--apply]                       (tools/fixes/world-levels)
 //     netgame-order     --project P --net18 F [--apply | --verify] [...]      (tools/fixes/netgame-order)
 //     emblem-cap3       --project P [--apply]                                 (tools/fixes/wall-emblem-test)
 //     eula-box          --project P [--apply]                                 (tools/fixes/dctools)
@@ -47,6 +48,7 @@ int wmain(int argc, wchar_t **argv) {
     try {
         if (step == "remove-lab") return u3::remove_lab(a);
         if (step == "remove-rpcn-page") return u3::remove_rpcn_page(a);
+        if (step == "world-levels") return u3::world_levels(a);
         if (step == "netgame-order") return u3::netgame_order(a);
         if (step == "emblem-cap3") return u3::emblem_cap3(a);
         if (step == "eula-box") return u3::eula_box(a);

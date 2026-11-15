@@ -751,4 +751,16 @@ std::optional<double> mask_scale(Ps3Programs &P, const std::string &name) {
     return out;
 }
 
+// the number of texture reads of the material's main-pass program with the second UV set (f[TEX0].zw): an overlay layer
+// on UV set 2 reads two (its colour and its mask); a blended window reading only a crack mask there reads one
+int uv_set2_reads(Ps3Programs &P, const std::string &name) {
+    if (!P.table) build_table(P);
+    auto e = P.table->find(name);
+    if (e == P.table->end()) return 0;
+    int n = 0;
+    for (const std::string &l : e->second.first)
+        n += int(l.compare(0, 3, "TEX") == 0 && l.find("f[TEX0].zw") != std::string::npos);
+    return n;
+}
+
 }  // namespace u3::fp

@@ -23,12 +23,19 @@ std::optional<std::string> tex_role(const std::string &s);
 std::optional<std::string> tex_role_final(const std::string &s);
 std::optional<std::string> param_role(const std::string &p);
 std::string ps4key(const std::string &ps3name);       // 'dir/file/variant' -> 'dir/file:variant'
+// a U3 PS3 material's overlay layers, (colour, mask) short paths without the hash tail: in a material whose render
+// state does not alpha-test, a '-trans' / '-alpha' / '-opacity' texture named like another (colour) texture of the
+// material is that texture's overlay mask (ldn-wall-graffiti-01 + ldn-wall-graffiti-01-alpha, ldn-alley-graffiti-01-color +
+// ldn-alley-graffiti-01-trans): the PS3 program blends the surface colour to the overlay colour by the mask (times the
+// vertex colour), both read from UV set 2. Empty for an alpha-tested material or one of unknown state (U2)
+std::vector<std::pair<std::string, std::string>> overlay_pairs(const bg::Material3 &m, const std::vector<bg::Texture3> &texs);
 
 void make_res(const fs::path &out, const fs::path &pak_dir);   // the survey files (lib/mkres.py)
 
 struct PlanMat {
     std::string key, pak, name;
     bool exact = false;
+    bool twin = false;   // a template that binds exactly the PS3 material's own textures (texture twin): bindings keep them
     std::vector<std::pair<std::string, std::string>> binds;
     bg::Params ps3params;
     std::vector<std::string> roles, cls;
@@ -44,7 +51,10 @@ struct Plan {
 };
 // water_templates: the sky converter's retail water.fx templates (water_templates.json); empty = the old water rule
 // also_exclude: more retail paks (file names) the plan takes nothing from; the stage's own name is always left out
-Plan make_plan(const fs::path &ps3, const fs::path &res, const fs::path &water_templates = {}, const std::vector<std::string> &also_exclude = {});
+// pak_dir: the retail paks; given (U3), a PS3 material of another shader family than prime-shader (water meshes,
+// waterfall sheets and foam) is planned on the retail non-prime material whose constants match it
+Plan make_plan(const fs::path &ps3, const fs::path &res, const fs::path &water_templates = {}, const std::vector<std::string> &also_exclude = {},
+               const fs::path &pak_dir = {});
 std::string plan_json(const Plan &p);   // json.dump(plan, indent=1)
 
 // the device bundle: retail material records with their EFFECT closures, and texture descriptors + texels

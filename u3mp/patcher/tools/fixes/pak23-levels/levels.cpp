@@ -73,6 +73,11 @@ std::vector<Row> plan_rows() {
         if (f[0] == "family") { hdr = f; continue; }
         Row r;
         for (size_t i = 0; i < hdr.size() && i < f.size(); i++) r[hdr[i]] = f[i];
+        if (r["method"] == "stage" && stage::sky_level(r["name"])) {   // a sky level is always the sky converter's
+            r["method"] = "sky";
+            r["version"] = "sky";
+            r["opts"] = "-";
+        }
         rows.push_back(r);
     }
     return rows;
@@ -306,14 +311,18 @@ Bytes build(const Row &row, const std::map<std::pair<std::string, std::string>, 
     if (m == "vischeat") return vischeat_convert(ps3_source(row, idx));   // C++ (dctools/vischeat.cpp)
     if (m == "ingame") return ps4ingame_convert(ps3_source(row, idx), g_anim);   // C++ (dctools/ps4ingame.cpp)
     if (m != "stage") throw Stop("method " + m + " is not supported");
-    // C++ (dctools/ps4stage.cpp); 'mb' = paramfix + cubefix. No converter option sets environment values any more.
+    // C++ (dctools/ps4stage.cpp); every row gets paramfix + cubefix ('mb' is still accepted). No converter option sets environment values any more.
     if (!opts.empty()) throw Stop("stage option " + opts.begin()->first + " is not supported");
     stage::Options o;
     o.res = res_dir();
     o.pak_dir = pak4;
     o.texdict = texdict;
     o.plan_dir = g_tmp / "plans" / upath(row.at("overlay")) / upath(ver + opts_s);
-    o.mapbuild = flags.count("mb") != 0;
+    // paramfix + cubefix on every stage row (until recipe 1.20 only on the 40 'mb' rows): a non-exact material keeps no
+    // foreign template tint / brightness / incandescence (6335 such values on the other 281 rows, e.g. fort-multi
+    // crumbled-brick-plaster-low g_colorBrightness1 16 with a blue tint, sham-rockwall g_colorBrightness2 4.5); values the
+    // PS3 material sets itself are never touched
+    o.mapbuild = true;
     o.fixes = true;   // the fixes the old cloud / lost batches made (cloud-batches-r3 / lost-batches-r3) are converter rules now
     o.water_templates = upath(g_here + "/data/water_templates.json");
     o.default_lightmaps = default_lightmap_texels();

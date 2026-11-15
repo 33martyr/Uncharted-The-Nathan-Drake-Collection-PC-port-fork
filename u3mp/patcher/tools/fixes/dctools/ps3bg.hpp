@@ -96,6 +96,10 @@ Mat gen_tangents(const Mat &pos, const Mat &nrm3, const Mat *uv, const std::vect
 struct Material3 {
     std::string name;
     std::vector<uint32_t> textures;
+    // Uncharted 3: the alpha test of the material's own render state (a technique-pass node's state word +0x20 with bit
+    // 0x04000000): 1 alpha-tested, 0 not, -1 no pass node (unknown)
+    int alpha_test = -1;
+    int blend = -1;   // the first pass node blends (state word bit 0x02000000): 1 / 0, -1 unknown
 };
 struct Texture3 {
     std::string name;

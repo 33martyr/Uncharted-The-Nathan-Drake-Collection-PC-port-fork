@@ -17,7 +17,8 @@
 namespace u3 {
 
 // one PS4 item blob per PS3 COLLISION_DATA_HAVOK_BG item that has a mesh, in PS3 order
-// sky: the sky converter's version, which rotates degenerate triangles so no primitive reads as a Havok CUSTOM one
+// sky: every stage / sky row: degenerate triangles are dropped (as Havok's tools do), so no primitive reads as a Havok
+// CUSTOM one
 std::vector<std::shared_ptr<Blob>> havok_bg_blobs(const Pak &p, bool sky = false);
 
 // an FG prototype's ND collision mesh (decode_mesh + build_from_ps3): the packfile and the materials (friction, flags)

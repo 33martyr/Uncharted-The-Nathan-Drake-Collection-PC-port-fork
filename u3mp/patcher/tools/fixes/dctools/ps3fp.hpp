@@ -41,4 +41,7 @@ std::optional<BlendSource> blend_source(Ps3Programs &P, const std::string &name)
 std::optional<std::tuple<Bytes, uint32_t, uint32_t, uint32_t>> derive_texels(const Pak &p, const PakTexture &t, const std::string &chan, bool gamma, bool invert);
 std::optional<double> mask_scale(Ps3Programs &P, const std::string &name);
 
+// the texture reads of the main-pass program with UV set 2 (f[TEX0].zw), where the U3 overlay layers are laid out
+int uv_set2_reads(Ps3Programs &P, const std::string &name);
+
 }  // namespace u3::fp

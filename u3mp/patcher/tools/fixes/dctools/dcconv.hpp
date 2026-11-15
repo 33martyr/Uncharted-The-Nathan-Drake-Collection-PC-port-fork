@@ -25,6 +25,10 @@
 
 namespace u3::dcconv {
 
+// a U3 render-settings module (flat render-settings structs only) converted by its fixed PS3 -> PS4 field layout;
+// nullopt for any other module (Converter::convert uses it first)
+std::optional<Bytes> convert_render_settings(const Bytes &ps3);
+
 // the number of pointer slots of a module (PS3 or PS4)
 size_t slot_count(const Bytes &module);
 

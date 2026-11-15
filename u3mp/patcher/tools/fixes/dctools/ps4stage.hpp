@@ -49,6 +49,9 @@ Bytes stage_convert(const fs::path &ps3, const Options &o);
 // their retail paks; the sky converter, then paramfix. o.res, o.pak_dir, o.texdict, o.plan_dir as for the stage rows;
 // water_templates = pak23-levels/data/water_templates.json (the retail water.fx templates the sky planner scores)
 Bytes sky_convert(const fs::path &ps3, const std::string &level, const Options &o, const fs::path &water_templates);
+// true for a level the sky converter maps: such a level is always built by sky_convert, never by stage_convert (the
+// stage plan has no sky shader: its fallback made the sky a lit prime-shader surface, e.g. a flat red-brown Airport sky)
+bool sky_level(const std::string &level);
 
 // the cube texels of a PS3 cube map in the retail PS4 layout (mip-major, 8 slots per mip, PS4 tiled); none when the
 // PS3 data is short

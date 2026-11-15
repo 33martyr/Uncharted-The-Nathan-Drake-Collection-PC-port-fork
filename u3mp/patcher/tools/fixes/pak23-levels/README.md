@@ -39,7 +39,7 @@ levels.cpp for every stage row; the sky rows always had them):
 |---|---|
 | n015 / n015b | LEVEL_INFO_1 = the PS3 level flags |
 | 99, 100 C | a placeholder lightmap-uv stream (all integers) does not flag the instance as lightmapped |
-| h017c / h017co | degenerate collision triangles written so Havok never reads them as CUSTOM (the Borneo co-op freeze) |
+| h017c / h017co | degenerate collision triangles (no area) dropped, as Havok's tools do, so no primitive reads as a Havok CUSTOM one (the Borneo co-op freeze; the older rotation left (a,b,b) as the CUSTOM (b,b,a): 19 installed paks, 154 primitives) |
 | 101 / 101m | a detail-multiply colour layer gets the PS3 '-detail' map, else neutral white (not the black flat mask) |
 | b102 | '-height' / '-blend2' / '-inc' maps in BlendMap / ColorTintMask3 / IncandescenceMask (BC1 UNORM) |
 | b103 (+ b104) | blend-map polarity from the PS3 fragment program (inverted copy), blend factor from another texture's channel |
