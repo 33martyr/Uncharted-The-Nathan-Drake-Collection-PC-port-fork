@@ -62,6 +62,8 @@ int convert_dc1(const std::vector<std::string> &argv);         // tools/fixes/dc
 int dc_recipes(const std::vector<std::string> &argv);          // tools/fixes/dcconv/apply_recipes.cpp
 int sound_banks(const std::vector<std::string> &argv);         // tools/fixes/sound-banks/convert_banks.cpp
 int part_modules(const std::vector<std::string> &argv);        // tools/fixes/part-emitters/build_part_modules.cpp
+int audio_defs(const std::vector<std::string> &argv);          // tools/fixes/audio-defs/audio_defs.cpp
+int music_streams(const std::vector<std::string> &argv);       // tools/fixes/music-streams/copy_music.cpp
 int actors_hk(const std::vector<std::string> &argv);           // tools/fixes/actor33/actors_hk.cpp
 int coop_vo(const std::vector<std::string> &argv);             // tools/fixes/coop-vo/apply_vo.cpp
 int coop_voice2(const std::vector<std::string> &argv);         // tools/fixes/coop-voice2/apply_coop_vox.cpp

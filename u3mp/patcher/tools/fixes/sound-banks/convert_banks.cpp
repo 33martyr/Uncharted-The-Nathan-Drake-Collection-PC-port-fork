@@ -1,5 +1,5 @@
 // Recipe step convert-banks: overlay-r3 sound1/banks/ps4, the 124 PS3 sound banks converted to the PS4 SCREAM format.
-// Replaces convert_banks.py, bnkconv.py and vagenc.py (the encoder is native/vagenc.c's algorithm).
+// Replaces convert_banks.py and bnkconv.py.
 //   u3fix sound-banks --project P --job J --ps3-disc D --ps3-update D [--out DIR] [--backup DIR] [--only a.bnk,b.bnk]
 //                     [--ffmpeg EXE] [--jobs N] [--force] [--apply]
 // banks_list.json (job folder): output name, archive (disc:build/main/sound1/banks.psarc, disc:goty-dlc.psarc,
@@ -9,11 +9,11 @@
 // PS3 bank (SBlk v4 / v5, big endian) -> PS4 (SBlk v13, little endian): the sound table (12 -> 0x24 bytes), the grain
 // table (data grains point into the grain data, others keep three u8 params or a u24), the grain data blocks by type
 // (1 sample grains with the pitch as a PS4 rate and the envelope, 0x2d stream grains, 4 / 5 / 6 / 7 / 0x2f / 0x30 /
-// 0x32 records), the name table and the audio: PS-ADPCM samples copied with a 0x20-byte PS4 sample header, MP3
-// (codec 3) samples decoded with ffmpeg (-f mp3 ... -f s16le -ac 1 -ar <rate>; trimmed to the header's sample count) and
-// PCM16 samples re-encoded to PS-ADPCM. Without ffmpeg the banks with MP3 samples are skipped with a message.
+// 0x32 records), the name table and the audio: every sample kept in its own codec with the PS4 sample header of that
+// codec (see sample_header below): PS-ADPCM frames copied, MP3 kept as MP3, PCM16 byte-swapped. No re-encoding, no
+// ffmpeg (--ffmpeg is accepted and ignored).
 // Dry run by default; --apply backs replaced files up once to work/backup-sound-banks. Idempotent: a bank at the
-// reference sha256, or at what this step wrote last time (convert_banks-state.json), is left alone unless --force.
+// reference sha256 (banks_list.json) is left alone unless --force.
 #include "json.h"
 #include "proc.hpp"
 #include "psarc.hpp"
@@ -225,165 +225,55 @@ Bytes conv_block(int t, const Bytes &b) {
     throw Stop(u3::fmt("KeyError: 'grain data type %#x'", t));
 }
 
-// samples / loop start / loop end of a PS-ADPCM stream (the PS4 sample header fields)
-std::array<uint32_t, 3> adpcm_info(const Bytes &data) {
-    const size_t nfr = data.size() / 16;
-    size_t end = nfr;
-    uint32_t ls = 0xffffffff, le = 0xffffffff;
-    for (size_t i = 0; i < nfr; i++) {
-        const uint8_t f = data[i * 16 + 1];
-        if ((f & 4) && ls == 0xffffffff) ls = uint32_t(i * 28);
-        if (f & 1) {
-            end = i + 1;
-            break;
-        }
-    }
-    if (ls != 0xffffffff) le = uint32_t(end * 28) - ls;   // the loop length
-    return {uint32_t(end * 28), ls, le};
-}
-Bytes sample_header(uint32_t samples, uint32_t ls, uint32_t le) {
+// ---- samples. A PS4 sample is a header and the data. The header's first word is the codec << 16, as the retail PS4
+// banks have them (18 452 samples checked: 0 PCM16, 1 PS-ADPCM, 3 ATRAC9, 4 MP3):
+//   PCM16 / PS-ADPCM: 0x20 bytes {codec << 16, 1, 0x10, 0, samples, 1, loop start, loop length}; no loop = start
+//                     0xffffffff, length 0
+//   MP3:              0x10 bytes {4 << 16, 1, 0x80, 0}, then the PS3 MP3 sample's 0x80-byte header as little-endian
+//                     words (+0x3c, 0 on PS3, becomes the loop start: 0, or 0xffffffff for none) and its MPEG data
+//                     (header +0x34 bytes) unchanged; retail facility-multi.bnk keeps its PS3 MP3 samples this way
+// A sample loops when its grain has flag 0x40 (PS3 and PS4 alike): PS-ADPCM loops are in the frame flags (bit 2 loop
+// start, bit 0 end), a looping PCM16 or MP3 sample loops whole.
+constexpr uint32_t C_PCM16 = 0, C_ADPCM = 1, C_MP3 = 4;
+Bytes sample_header(uint32_t codec, uint32_t samples, uint32_t ls, uint32_t len) {
     Bytes o;
-    for (uint32_t v : {0u, 1u, 0x10u, 0u, samples, 1u, ls, le}) le32(o, v);
+    for (uint32_t v : {codec << 16, 1u, 0x10u, 0u, samples, 1u, ls, len}) le32(o, v);
+    return o;
+}
+// PS3 PS-ADPCM as the PS4 sample: the PS3 leading all-zero frame and everything after the end frame (the silent loop
+// frame, trailers) are left out, as retail PS4 does (the 61 retail PS-ADPCM samples equal their PS3 frames this way)
+Bytes adpcm_sample(const Bytes &src) {
+    size_t first = 0, nfr = src.size() / 16;
+    if (nfr > 1 && std::all_of(src.begin(), src.begin() + 16, [](uint8_t c) { return c == 0; })) first = 1;
+    size_t end = nfr;
+    uint32_t ls = 0xffffffff;
+    for (size_t i = first; i < nfr; i++) {
+        const uint8_t f = src[i * 16 + 1];
+        if ((f & 4) && ls == 0xffffffff) ls = uint32_t((i - first) * 28);
+        if (f & 1) { end = i + 1; break; }
+    }
+    const uint32_t n = uint32_t((end - first) * 28);
+    Bytes o = sample_header(C_ADPCM, n, ls, ls == 0xffffffff ? 0 : n - ls);
+    o.insert(o.end(), src.begin() + std::ptrdiff_t(first * 16), src.begin() + std::ptrdiff_t(end * 16));
+    return o;
+}
+bool is_mp3(const Bytes &src) { return src.size() >= 0x80 && be32(src, 0) == 1 && be32(src, 4) == 3; }
+Bytes mp3_sample(const Bytes &src, bool loop) {
+    Bytes o;
+    for (uint32_t v : {C_MP3 << 16, 1u, 0x80u, 0u}) le32(o, v);
+    for (size_t i = 0; i < 0x80; i += 4) le32(o, i == 0x3c ? (loop ? 0u : 0xffffffffu) : be32(src, i));   // +0x3c: loop start
+    const size_t n = std::min<size_t>(src.size(), 0x80 + size_t(be32(src, 0x34)));   // the MPEG data size, no padding
+    o.insert(o.end(), src.begin() + 0x80, src.begin() + std::ptrdiff_t(n));
+    return o;
+}
+Bytes pcm16_sample(const Bytes &src, bool loop) {   // PS3 PCM16 big endian -> little endian
+    const uint32_t n = uint32_t(src.size() / 2);
+    Bytes o = sample_header(C_PCM16, n, loop ? 0 : 0xffffffff, loop ? n : 0);
+    for (size_t i = 0; i + 1 < src.size(); i += 2) o.push_back(src[i + 1]), o.push_back(src[i]);
     return o;
 }
 
-// PS-ADPCM (VAG) encoder of the original 2026-10-27 converter (native/vagenc.c): per 28-sample block every filter is
-// tried with its open-loop shift and that shift - 1, closed-loop quantised; the lowest squared error wins
-Bytes vag_encode(const std::vector<int16_t> &pcm) {
-    static const double F[5][2] = {{0, 0}, {60 / 64.0, 0}, {115 / 64.0, -52 / 64.0}, {98 / 64.0, -55 / 64.0}, {122 / 64.0, -60 / 64.0}};
-    const int n = int(pcm.size()), nblk = n > 0 ? (n + 27) / 28 : 1;
-    Bytes out(size_t(nblk) * 16, 0);
-    double s1 = 0, s2 = 0;
-    for (int b = 0; b < nblk; b++) {
-        double blk[28];
-        for (int k = 0; k < 28; k++) {
-            const int i = b * 28 + k;
-            blk[k] = i < n ? pcm[size_t(i)] : 0;
-        }
-        double best = 1e300, b1 = 0, b2 = 0;
-        int bf = 0, bs = 0, bn[28] = {};
-        for (int fi = 0; fi < 5; fi++) {
-            const double f1 = F[fi][0], f2 = F[fi][1];
-            double p1 = s1, p2 = s2, peak = 0;
-            for (int k = 0; k < 28; k++) {
-                const double r = blk[k] - (p1 * f1 + p2 * f2);
-                if (std::fabs(r) > peak) peak = std::fabs(r);
-                p2 = p1;
-                p1 = blk[k];
-            }
-            int sh = 12;
-            while (sh > 0 && peak > double((7 << (12 - sh)) - 1)) sh--;
-            for (int t = 0; t < 2; t++) {
-                const int shc = t == 0 ? sh : (sh > 0 ? sh - 1 : 0);
-                double q1 = s1, q2 = s2, err = 0;
-                int nib[28];
-                for (int k = 0; k < 28; k++) {
-                    const double pred = q1 * f1 + q2 * f2;
-                    const double v = (blk[k] - pred) * double(1 << shc) / 4096.0;
-                    int vi = int(std::lrint(v));
-                    vi = std::clamp(vi, -8, 7);
-                    double y = double((vi * 4096) >> shc) + pred;
-                    if (y > 32767) y = 32767;
-                    if (y < -32768) y = -32768;
-                    err += (blk[k] - y) * (blk[k] - y);
-                    nib[k] = vi;
-                    q2 = q1;
-                    q1 = y;
-                }
-                if (err < best) {
-                    best = err;
-                    bf = fi;
-                    bs = shc;
-                    std::copy(nib, nib + 28, bn);
-                    b1 = q1;
-                    b2 = q2;
-                }
-            }
-        }
-        s1 = b1;
-        s2 = b2;
-        uint8_t *o = &out[16 * size_t(b)];
-        o[0] = uint8_t((bf << 4) | bs);
-        o[1] = b == nblk - 1 ? 1 : 0;
-        for (int k = 0; k < 28; k += 2) o[2 + k / 2] = uint8_t((bn[k] & 15) | ((bn[k + 1] & 15) << 4));
-    }
-    return out;
-}
-
-struct Skip : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
-bool is_mp3(const Bytes &A, size_t ao, size_t asz) { return asz >= 56 && ao + asz <= A.size() && be32(A, ao) == 1 && be32(A, ao + 4) == 3; }
-
-// The MP3 samples of one bank decoded by one ffmpeg run instead of one run each: every sample is its own input file and
-// its own output (-map <n>:a, its own -ar), so each is decoded and resampled exactly as in a run of its own. Starting a
-// process costs far more on Windows than decoding a short sample (2 084 runs were 84% of the step). Up to 64 samples a
-// run (the command line limit). nullopt when a run fails: the samples are then decoded one by one, which reports the
-// failing sample's error.
-std::optional<std::vector<Bytes>> decode_mp3_batch(const std::string &ff, const std::vector<std::pair<Bytes, uint32_t>> &in) {
-    static std::atomic<unsigned> serial{0};
-    const fs::path dir = fs::temp_directory_path() / ("u3fix-mp3-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(serial++));
-    struct Cleanup {
-        fs::path d;
-        ~Cleanup() {
-            std::error_code ec;
-            fs::remove_all(d, ec);
-        }
-    } cleanup{dir};
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    if (ec) return std::nullopt;
-    std::vector<Bytes> out;
-    for (size_t first = 0; first < in.size(); first += 64) {
-        const size_t n = std::min<size_t>(64, in.size() - first);
-        std::vector<std::string> cmd = {ff, "-v", "error", "-y"};
-        for (size_t i = 0; i < n; i++) {
-            const fs::path p = dir / ("in" + std::to_string(i) + ".mp3");
-            std::ofstream(p, std::ios::binary).write(reinterpret_cast<const char *>(in[first + i].first.data()), std::streamsize(in[first + i].first.size()));
-            cmd.insert(cmd.end(), {"-f", "mp3", "-i", utf8(p)});
-        }
-        for (size_t i = 0; i < n; i++)
-            cmd.insert(cmd.end(), {"-map", std::to_string(i) + ":a", "-f", "s16le", "-ac", "1", "-ar", std::to_string(in[first + i].second),
-                                   utf8(dir / ("out" + std::to_string(i) + ".raw"))});
-        Bytes ignored;
-        std::string err;
-        if (run_pipe(cmd, {}, ignored, err)) return std::nullopt;
-        for (size_t i = 0; i < n; i++) {
-            const fs::path p = dir / ("out" + std::to_string(i) + ".raw");
-            if (!fs::is_regular_file(p, ec)) return std::nullopt;
-            std::ifstream f(p, std::ios::binary);
-            out.emplace_back((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        }
-    }
-    return out;
-}
-
-// an MP3 (codec 3) or PCM16 BE sample of the PS3 audio section -> PS4 0x20 header + PS-ADPCM. `decoded`: the MP3's
-// PCM from decode_mp3_batch, if it ran.
-Bytes encode_sample(const Bytes &A, size_t ao, size_t asz, const std::string &ff, const Bytes *decoded = nullptr) {
-    const Bytes src = sub(A, ao, ao + asz);
-    std::vector<int16_t> x;
-    if (src.size() >= 56 && be32(src, 0) == 1 && be32(src, 4) == 3) {   // MP3 with its header
-        const uint32_t rate = rbe32(A, ao + 0xc), nsmp = rbe32(A, ao + 0x24), dsz = rbe32(A, ao + 0x34);
-        if (ff.empty()) throw Skip("needs ffmpeg (MP3 sample)");
-        Bytes pcm;
-        std::string err;
-        const int rc = decoded ? (pcm = *decoded, 0)
-                               : run_pipe({ff, "-v", "error", "-f", "mp3", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", std::to_string(rate), "pipe:1"},
-                                          sub(A, ao + 0x80, ao + 0x80 + dsz), pcm, err);
-        if (rc) throw Skip("ffmpeg: " + (err.size() > 300 ? err.substr(err.size() - 300) : err));
-        for (size_t i = 0; i + 1 < pcm.size(); i += 2) x.push_back(int16_t(pcm[i] | pcm[i + 1] << 8));
-        if (nsmp && x.size() > nsmp) x.resize(nsmp);
-    } else   // PCM16 big endian
-        for (size_t i = 0; i + 1 < src.size(); i += 2) x.push_back(int16_t(src[i] << 8 | src[i + 1]));
-    const Bytes v = vag_encode(x);
-    Bytes o = sample_header(uint32_t(v.size() / 16 * 28), 0xffffffff, 0xffffffff);
-    app(o, v);
-    return o;
-}
-
-Bytes convert(const Bytes &d, const std::string &ff) {
+Bytes convert(const Bytes &d) {
     // ---- PS3 parse
     uint32_t h[8];
     for (int k = 0; k < 8; k++) h[k] = rbe32(d, 4 * size_t(k));
@@ -421,30 +311,17 @@ Bytes convert(const Bytes &d, const std::string &ff) {
         bool operator<(const K &o) const { return std::tie(kind, ao, asz) < std::tie(o.kind, o.ao, o.asz); }
     };
     std::vector<K> order;
-    std::set<K> seen, pcm;
+    std::set<K> seen, pcm, loop;
     for (const Bytes &g : gr) {
         if (g[0] != 1 && g[0] != 0x2d) continue;
         const Bytes b = block(g);
         const K k = g[0] == 1 ? K{'s', rbe32(b, 16), rbe32(b, 20)} : K{'n', rbe32(b, 16), 0};
         if (seen.insert(k).second) order.push_back(k);
-        if (g[0] == 1 && b.size() > 15 && (b[15] & 0x80)) pcm.insert(k);
         if (g[0] == 1 && b.size() <= 15) throw Stop("IndexError: index out of range");
+        if (g[0] == 1 && (b[15] & 0x80)) pcm.insert(k);
+        if (g[0] == 1 && (b[15] & 0x40)) loop.insert(k);
     }
     std::stable_partition(order.begin(), order.end(), [](const K &k) { return k.kind == 's'; });
-    // the bank's MP3 samples decoded by one ffmpeg run
-    std::map<K, Bytes> decoded;
-    if (!ff.empty()) {
-        std::vector<K> keys;
-        std::vector<std::pair<Bytes, uint32_t>> in;
-        for (const K &k : order)
-            if (k.kind == 's' && is_mp3(A, k.ao, k.asz)) {
-                keys.push_back(k);
-                in.push_back({sub(A, k.ao + 0x80, size_t(k.ao) + 0x80 + be32(A, k.ao + 0x34)), be32(A, k.ao + 0xc)});
-            }
-        if (!keys.empty())
-            if (auto pcm = decode_mp3_batch(ff, in))
-                for (size_t i = 0; i < keys.size(); i++) decoded[keys[i]] = std::move((*pcm)[i]);
-    }
     Bytes audio4;
     std::map<K, std::pair<uint32_t, uint32_t>> amap;
     for (const K &k : order) {
@@ -456,17 +333,11 @@ Bytes convert(const Bytes &d, const std::string &ff) {
             blob = sub(A, k.ao, e);
         } else {
             const Bytes src = sub(A, k.ao, size_t(k.ao) + k.asz);
-            const bool mp3 = k.asz != 0 && src.size() >= 8 && be32(src, 0) == 1 && be32(src, 4) == 3;
-            if (!pcm.count(k) && k.asz != 0 && src.size() < 8) throw Stop("struct.error: unpack_from requires a buffer of at least 8 bytes");
-            if (!pcm.count(k) && (k.asz == 0 || !mp3)) {   // PS-ADPCM: copied
-                const auto [smp, ls, le] = adpcm_info(src);
-                blob = sample_header(smp, ls, le);
-                app(blob, src);
-            } else
-                blob = encode_sample(A, k.ao, k.asz, ff, decoded.count(k) ? &decoded.at(k) : nullptr);
+            blob = is_mp3(src) ? mp3_sample(src, loop.count(k) != 0) : pcm.count(k) ? pcm16_sample(src, loop.count(k) != 0) : adpcm_sample(src);
         }
         amap[k] = {uint32_t(audio4.size()), uint32_t(blob.size())};
         app(audio4, blob);
+        if (k.kind == 's') audio4.resize((audio4.size() + 15) & ~size_t(15), 0);   // samples start 16-aligned, as in retail banks
     }
     const uint32_t audio_size = uint32_t(audio4.size());
     // ---- grain table and data
@@ -562,9 +433,9 @@ Bytes convert(const Bytes &d, const std::string &ff) {
 
 }  // namespace
 
-// one PS3 bank converted (the Uncharted 2 import): the envelope table from adsr_env.json (read once), MP3 samples
-// through ffmpeg. Throws Stop; a bank with MP3 samples and no ffmpeg throws std::invalid_argument("needs ffmpeg").
-Bytes sound_bank_convert(const Bytes &ps3, const std::string &ffmpeg, const fs::path &adsr_env, std::string &note) {
+// one PS3 bank converted (the Uncharted 2 import): the envelope table from adsr_env.json (read once). Throws Stop.
+// `ffmpeg` is no longer used (MP3 samples stay MP3).
+Bytes sound_bank_convert(const Bytes &ps3, const std::string &, const fs::path &adsr_env, std::string &note) {
     if (g_env.empty()) {
         json::Value e;
         if (!json::parse(text_file(adsr_env), e)) throw Stop("adsr_env.json is not JSON");
@@ -573,12 +444,7 @@ Bytes sound_bank_convert(const Bytes &ps3, const std::string &ffmpeg, const fs::
             g_env.push_back({{uint32_t(std::stoul(k.substr(0, c), nullptr, 16)), uint32_t(std::stoul(k.substr(c + 1), nullptr, 16))}, v.s});
         }
     }
-    Bytes out;
-    try {
-        out = convert(ps3, ffmpeg);
-    } catch (const Skip &) {
-        throw std::invalid_argument("bank has MP3 samples and ffmpeg was not found");
-    }
+    const Bytes out = convert(ps3);
     const size_t s = be32(ps3, 8);
     note = fmt("SBlk v%u -> v13, %u sounds, %u grains", be32(ps3, s + 4), be32(ps3, s + 20), be32(ps3, s + 24) >> 16);
     return out;
@@ -628,16 +494,7 @@ int sound_banks(const std::vector<std::string> &argv) {
         for (size_t k = 0; k <= on.size(); k++)
             if (k == on.size() || on[k] == ',') { only.insert(on.substr(s, k - s)); s = k + 1; }
     }
-    const std::string ff = find_ffmpeg(a.get("--ffmpeg", ""));
-    if (ff.empty()) std::printf("ffmpeg not found: banks with MP3 samples are skipped (set RECIPE_FFMPEG or put ffmpeg on PATH)\n");
     const std::map<std::string, std::string> roots = {{"disc", a.get("--ps3-disc", "")}, {"update", a.get("--ps3-update", "")}};
-    const fs::path statef = backup / "convert_banks-state.json";
-    std::map<std::string, std::string> state;   // json.dump(sort_keys=True)
-    if (fs::is_regular_file(statef)) {
-        json::Value s;
-        if (json::parse(text_file(statef), s))
-            for (const auto &[k, v] : s.fields) state[k] = v.s;
-    }
     int identical = 0, equivalent = 0, skipped = 0, missing = 0;
     const auto t0 = std::chrono::steady_clock::now();
     struct Job {
@@ -650,8 +507,7 @@ int sound_banks(const std::vector<std::string> &argv) {
         const fs::path dst = outd / upath(name);
         if (fs::is_regular_file(dst) && !a.has("--force")) {
             const std::string cur = sha_file(dst);
-            auto st = state.find(name);
-            if (cur == ref || (st != state.end() && st->second == cur)) {
+            if (cur == ref) {
                 skipped++;
                 continue;
             }
@@ -697,10 +553,8 @@ int sound_banks(const std::vector<std::string> &argv) {
                     data = it->second.first->read(e->second);
                 }
                 try {
-                    res[i].out = convert(data, ff);
+                    res[i].out = convert(data);
                     res[i].ok = true;
-                } catch (const Skip &e) {
-                    res[i].msg = std::string("skipped: ") + e.what();
                 } catch (const std::exception &e) {
                     res[i].fatal = e.what();
                 }
@@ -720,7 +574,7 @@ int sound_banks(const std::vector<std::string> &argv) {
         const std::string h = sha256_hex(res[i].out);
         const bool same = h == j.ref;
         (same ? identical : equivalent)++;
-        std::printf("%-40s %s%s\n", j.name.c_str(), same ? "identical to the reference" : "equivalent (re-encoded ADPCM samples)", a.has("--apply") ? "" : " (dry run)");
+        std::printf("%-40s %s%s\n", j.name.c_str(), same ? "identical to the reference" : "differs from the reference sha256 (banks_list.json)", a.has("--apply") ? "" : " (dry run)");
         if (a.has("--apply")) {
             fs::create_directories(outd);
             if (fs::is_regular_file(dst)) {
@@ -729,18 +583,7 @@ int sound_banks(const std::vector<std::string> &argv) {
                 if (!fs::exists(bk)) fs::copy_file(dst, bk);
             }
             write_file_replace(dst, res[i].out);
-            state[j.name] = h;
         }
-    }
-    if (a.has("--apply") && !state.empty()) {
-        fs::create_directories(backup);
-        std::string t = "{";
-        bool first = true;
-        for (const auto &[k, v] : state) {
-            t += std::string(first ? "\n" : ",\n") + "\"" + k + "\": \"" + v + "\"";
-            first = false;
-        }
-        write_text(statef, t + "\n}");
     }
     if (identical + equivalent == 0 && missing == 0) std::printf("already applied: %d banks up to date\n", skipped);
     else

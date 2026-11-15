@@ -2,6 +2,7 @@
 copy-ps3-vtex1
 copy-ps3-speech
 copy-ps3-sfx
+music-streams
 copy-ps4-retail
 convert-levels-port
 convert-levels-r2
@@ -50,4 +51,5 @@ remove-lab
 remove-rpcn-page
 netgame-order-119
 booster-table
+audio-defs
 world-levels

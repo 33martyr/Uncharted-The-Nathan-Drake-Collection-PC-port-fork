@@ -10,8 +10,8 @@
 //           words byte-swapped except word 2 (a float PS3 already stores little endian). 0000 ends the header.
 //   data    PS3 interleaves the channels frame by frame; PS4 stores blocks of <interleave> frames per channel, the
 //           last block zero-padded (one channel: padded to a whole block).
-// Sound banks (SCREAM SBlk v4 / v5 -> v13): the Uncharted 3 converter (u3mp/patcher/tools/fixes/sound-banks), MP3
-// samples through ffmpeg.
+// Sound banks (SCREAM SBlk v4 / v5 -> v13): the Uncharted 3 converter (u3mp/patcher/tools/fixes/sound-banks); every
+// sample keeps its own codec (no ffmpeg since converter version 2).
 #include "u2import.hpp"
 #include "u3fix.hpp"   // u3::sound_bank_convert, u3::find_ffmpeg
 
