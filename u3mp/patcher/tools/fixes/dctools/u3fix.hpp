@@ -68,6 +68,7 @@ int coop_voice2(const std::vector<std::string> &argv);         // tools/fixes/co
 int elim_pic(const std::vector<std::string> &argv);            // tools/fixes/dctools/net_edits.cpp
 int classic(const std::vector<std::string> &argv);             // tools/fixes/dctools/net_edits.cpp
 int skins_net_names(const std::vector<std::string> &argv);     // tools/fixes/dctools/net_edits.cpp
+int booster_table(const std::vector<std::string> &argv);       // tools/fixes/dctools/net_edits.cpp
 int shade_npc(const std::vector<std::string> &argv);           // tools/fixes/coop-audit/apply_shade_npc_paks.cpp
 int facility_collapse(const std::vector<std::string> &argv);   // tools/fixes/inline/facility_collapse.cpp
 std::string find_ffmpeg(const std::string &arg);         // --ffmpeg, RECIPE_FFMPEG, msys2, PATH (sound-banks/convert_banks.cpp)

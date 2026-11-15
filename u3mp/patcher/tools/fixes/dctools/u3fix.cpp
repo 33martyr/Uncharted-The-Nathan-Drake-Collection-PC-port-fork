@@ -21,6 +21,7 @@
 //     actors            --project P --job J --ps4 D --ps3-disc D --ps3-update D --ps3-data2 D [--apply] [--overlays ...] [--only ...] [--allow-equivalent] [--jobs N]   (tools/fixes/actor33)
 //     rebuild-am        <am|hats|igc2> --project P --job J --ps4 D --ps3-disc D --ps3-update D --ps3-data2 D [--only a,b] [--jobs N]   (tools/fixes/actor33)
 //     install-am        <am|hats|igc2> --project P [--work DIR] [--only a,b] [--apply | --restore]   (tools/fixes/actor33)
+//     booster-table     --project P --net18 F [--apply]                       (tools/fixes/dctools/net_edits.cpp)
 //     pakinfo           PAK ... [--textures] [--noitems]             (dctools/ndpak.cpp, a maintainer check)
 //
 // The package builds it into u3mp/bin (tools/package_windows.sh), which the importer puts on PATH; a recipe step runs
@@ -76,6 +77,7 @@ int wmain(int argc, wchar_t **argv) {
         if (step == "elim-pic") return u3::elim_pic(a);
         if (step == "classic") return u3::classic(a);
         if (step == "skins-net-names") return u3::skins_net_names(a);
+        if (step == "booster-table") return u3::booster_table(a);
         if (step == "shade-npc") return u3::shade_npc(a);
         if (step == "facility-collapse") return u3::facility_collapse(a);
         if (step == "eula-pages") return u3::eula_pages(a);
