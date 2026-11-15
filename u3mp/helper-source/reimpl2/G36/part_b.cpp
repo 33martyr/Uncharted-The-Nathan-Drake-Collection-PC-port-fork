@@ -28,7 +28,7 @@ void u3x_party_lock(uintptr_t base, int v);
 int u3x_popup_timed(uintptr_t base, void *s, uint32_t text, int seconds, uint32_t ok, uint32_t cancel);
 int32_t u3x_net_clock(uintptr_t base);
 uint8_t *u3x_mmv_netgame(void *s, int16_t i);
-int u3x_has_difficulty_vote(uint32_t game_type);
+int u3x_difficulty_vote_for(uintptr_t base, uint32_t game_type);
 void u3x_vote_open(uint8_t *vote);
 int u3x_stand_in_vote(uint32_t now);
 
@@ -267,7 +267,7 @@ U3X_FN int u3x_n09_open(uintptr_t base, void *s) {
     if (!record) return 0;
     const uint32_t type = rd<uint32_t>(record, 0xc);
     ec[254] = type & 0xff;
-    if (!u3x_has_difficulty_vote(type)) return 0;
+    if (!u3x_difficulty_vote_for(base, type)) return 0;
 
     u3x_vote_open(&at<uint8_t>(base + DIFF_VOTE));
     set_status(base, 4, 10);

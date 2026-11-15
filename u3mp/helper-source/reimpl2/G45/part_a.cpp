@@ -7,7 +7,7 @@ uint8_t *u3h_kr_prec(uint8_t *S, uint8_t *np);
 uint32_t u3x_net_player_id(const uint8_t *np);
 uint32_t u3x_weapon_for_stat(const uint32_t *fixed, const uint32_t *extra, uint32_t number);
 uint32_t u3x_weapon_stat_number(const uint32_t *fixed, const uint32_t *extra, uint32_t weapon);
-int u3x_weapon_group(uint32_t weapon);
+int u3x_kr_weapon_group(uintptr_t base, uint32_t weapon);
 
 void u3x_kr_379c18(uintptr_t base, void *s, uint8_t *knp, uint8_t *info);
 void u3x_kr_37952c(uintptr_t base, void *s, uint8_t *S, uint8_t *knp);
@@ -202,7 +202,7 @@ extern "C" U3X_FN void u3x_kr_37992c(uintptr_t base, void *s, uint8_t *S, uint8_
         if (uncounted(r) || killer_of(r) != killer || !enemy_kill(r)) continue;
         const uint32_t x = weapon_of_record(base, r);
         if (x == weapon) { ++same; ++group; }
-        else if (u3x_weapon_group(x) == 6) ++group;
+        else if (u3x_kr_weapon_group(base, x) == 6) ++group;
     }
     u3h_kr_stat(base, s, weapon_f(base, 1), group, knp);   // the id of Q0 is the event id
 
@@ -211,7 +211,7 @@ extern "C" U3X_FN void u3x_kr_37992c(uintptr_t base, void *s, uint8_t *S, uint8_
     for (uint32_t i = 0; i < record_count(S); ++i) {
         const uint8_t *r = record(S, i);
         if (killer_of(r) == killer && enemy_kill(r)) {
-            if (u3x_weapon_group(weapon_of_record(base, r)) != 6) break;
+            if (u3x_kr_weapon_group(base, weapon_of_record(base, r)) != 6) break;
             ++run;
         } else if (victim_of(r) == killer) {
             break;

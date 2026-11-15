@@ -5,6 +5,7 @@ uint8_t *u3h_ext(void);
 uint32_t u3h_sincos(uint32_t x, uint32_t cosine);
 void u3h_ring_colour(uint32_t *col);
 uint32_t *u3h_t009_diag(void);
+uint32_t u3x_float_call(uintptr_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3);  // G51 4.1
 
 void u3x_marker_ring(uintptr_t b, uint32_t scale, uint32_t p, uint32_t depth, uint32_t x, uint32_t y,
                      const uint8_t *desc, const uint32_t *col);
@@ -13,9 +14,6 @@ void u3x_counter_ring(uintptr_t b, uint32_t scale, uint32_t p, uint32_t r1, uint
                       uint32_t y, const uint8_t *desc, const uint32_t *col);
 int u3x_counter_ring_site(uintptr_t b, const uint64_t *r);
 }
-
-// the float-returning call shim of the C++ part (the integrator puts the real one in scope)
-uint32_t call_float1(uintptr_t fn, uint64_t a0);
 
 namespace g47a {
 
@@ -187,7 +185,7 @@ extern "C" U3X_FN int u3x_counter_ring_site(uintptr_t b, const uint64_t *r) {
         return 0;
     }
 
-    const uint32_t p = call_float1(b + FN_PROGRESS, b + 0x17cb060);
+    const uint32_t p = u3x_float_call(b + FN_PROGRESS, b + 0x17cb060, 0, 0, 0);
     eb[213] = p;
 
     uint32_t colour[4];

@@ -13,7 +13,7 @@ void u3h_n02_arm(uint32_t now);          // new export (integrator)
 // other groups
 int u3x_session_host(const uint8_t *session);
 uint32_t u3x_net_player_id(const uint8_t *np);
-int u3x_shows_match_stats(uint32_t mode, int private_party);
+int u3x_match_stats_shown(uintptr_t base, uint32_t mode, int flag);
 // parts A and B of this group
 int u3x_pm_ranked(uintptr_t base, void *s);
 void u3x_pm_party_vcall(uintptr_t base, uint32_t off, int arg, int three);
@@ -105,7 +105,7 @@ U3X_FN void go_to_page(uintptr_t base, uint32_t page) {
 }
 
 U3X_FN int stats_page_wanted(uintptr_t base) {
-    return u3x_shows_match_stats(at<uint32_t>(base + MATCH_MODE), at<uint8_t>(base + MS + S_ABORTED));
+    return u3x_match_stats_shown(base, at<uint32_t>(base + MATCH_MODE), at<uint8_t>(base + MS + S_ABORTED));
 }
 
 // step 8: the block at 0x17bb860 gets its two times once

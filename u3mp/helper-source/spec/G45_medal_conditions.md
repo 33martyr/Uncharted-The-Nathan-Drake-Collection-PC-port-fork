@@ -87,7 +87,7 @@ readers of 3.5, which each part writes for itself): **part A** = `u3x_kr_379c18`
 | `u3x_net_player_in_game` | `int u3x_net_player_in_game(const uint8_t *np)` | existing: non-zero when the player slot has joined and is not leaving (bytes +0xe1, +0x5e4); pure |
 | `u3x_weapon_for_stat` | `uint32_t u3x_weapon_for_stat(const uint32_t *fixed, const uint32_t *extra, uint32_t number)` | existing: weapon id of weapon stat number `number`: `fixed[number]` below 0x13, else from the extra weapon list (0 when `extra` is null or the number is past its end); pure |
 | `u3x_weapon_stat_number` | `uint32_t u3x_weapon_stat_number(const uint32_t *fixed, const uint32_t *extra, uint32_t weapon)` | existing: the weapon stat number of a weapon id (0 when unknown; `extra` may be null); pure |
-| `u3x_weapon_group` | `int u3x_weapon_group(uint32_t weapon)` | existing: 6, 4 or 0 for a weapon id (two small weapon classes the kill rewards treat apart); pure. See 3.7 (c) |
+| `u3x_kr_weapon_group` | `int u3x_kr_weapon_group(uintptr_t base, uint32_t weapon)` | G46 (4.15): 6, 4 or 0 for a weapon id (two small weapon classes the kill rewards treat apart); pure. See 3.7 (c) |
 
 The shared tools of CONVENTIONS.h used here: `game_call`, `at`, `rd`, `f_add`, `f_sub`, `f_mul`, `f_div`, `f_root`,
 `f_from_int`, `f_less`. "a ≤ b" on float patterns is not in CONVENTIONS.h: it is true when neither value is a NaN
@@ -253,7 +253,7 @@ confirm on a built image):
 All are 32-bit reads at call time (the one at 0xc478bb is unaligned); whether a value is read on every call or
 kept after the first is not observable.
 
-**(c) Weapon groups.** `u3x_weapon_group` (existing, called as it is, in no work group of the inventory) still
+**(c) Weapon groups.** `u3x_kr_weapon_group(base, weapon)` (G46 4.15; formerly the old `u3x_weapon_group`) still
 holds a literal list of ten weapon ids (inventory section C, "weapon group ids"). This group only calls it. For
 whoever replaces it: group 6 is exactly {F[1], F[6], F[7], F[8], F[9], F[13]} (= Q0 to Q5 above) and group 4 is
 exactly {G[20], G[21], G[22], G[23]}; the function has no `base` parameter today.
@@ -308,10 +308,10 @@ count, `knp`).
    the values match), w = message weapon id.
 3. First pass, i = 0 .. n − 1: skip the record when it is uncounted, its killer is not k, or it is not an enemy
    kill. Otherwise x = the weapon of its weapon number (3.5): when x equals w, same += 1 and group += 1; otherwise
-   when `u3x_weapon_group(x)` is 6, group += 1.
+   when `u3x_kr_weapon_group(base, x)` is 6, group += 1.
 4. Report (the id of Q0, group, `knp`).
 5. Second pass, i = 0 .. n − 1, run = 0: when the record's killer is k and it is an enemy kill: when
-   `u3x_weapon_group` of the weapon of its weapon number is not 6, stop; else run += 1. Otherwise, when the
+   `u3x_kr_weapon_group(base, ...)` of the weapon of its weapon number is not 6, stop; else run += 1. Otherwise, when the
    record's victim is k, stop. Otherwise go on. ("Uncounted" is not looked at in this pass.)
 6. Report (0xd2b04848, run, `knp`).
 7. When w is Q1, Q2, Q3 or Q4: report (w, same, `knp`). Otherwise, when w is Q5 or Q5b: report (0x7fdbcbbf, same,
@@ -486,7 +486,7 @@ needs the live game; the live check is only that medals appear in a match (G46's
 `u3x_kr_3590b0` (exported, in no list of the inventory); the private readers of 3.5, among them the two the
 inventory puts into G44 (`med_np_index` = "slot of id", `med_distance2` = "squared distance of a record").
 
-**Not covered, flagged**: `u3x_weapon_group` with its literal list of ten weapon ids (3.7 (c)).
+**Not covered here**: the weapon group rule itself, delivered by G46 as `u3x_kr_weapon_group` (integration correction 2026-11-15).
 
 **Behaviour that looks like a mistake or a leftover, to keep** (the new code must do the same):
 

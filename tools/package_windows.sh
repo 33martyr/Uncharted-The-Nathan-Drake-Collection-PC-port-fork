@@ -170,7 +170,7 @@ launcher_core() {   # the launcher's native code: its core, the game starter, th
     for f in launcher/uncharted_launcher.pyw launcher/updater.py tools/apply_update.py tools/probe_uncharted.py; do
         printf 'Placeholder for launchers up to 0.10.73, which check that this file exists before they install an\r\nupdate. It is not a program and nothing reads it.\r\n' > "$out/$f"
     done
-    cp launcher/assets/uncharted.ico launcher/assets/icon.png "$out/launcher/assets/"
+    cp launcher/assets/uncharted.ico launcher/assets/icon.png launcher/assets/window_icon.bmp "$out/launcher/assets/"
 }
 
 starter() {   # Uncharted Launcher.exe with the launcher's icon
