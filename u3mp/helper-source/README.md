@@ -6,25 +6,19 @@ new helper version.
 
 | File | What it is |
 |---|---|
-| `u3_lan_profiles.c` | the C part, and at its end a generated block (see below) |
+| `u3_lan_profiles.c` | the C part; it ends with a note where the maintainer's build adds a generated block (see below) |
 | `u3x_fixes.cpp` | the C++ part: where ported code goes |
 | `agc_port.inc`, `kr_port.inc` | C parts included by `u3_lan_profiles.c` |
 | `plat.h`, `plat_*.inc`, `u3_bearssl.inc` | the platform layer and TLS |
-| `tests/` | the old-versus-new test: `rewrite_test.cpp` and its `rewrite_test_b*.inc` parts |
+| `spec/`, `reimpl2/` | the descriptions of the function groups and their new code as it was tested |
 
-**The generated block.** Everything in `u3_lan_profiles.c` from the line
-`/* ===== u3x (C++): generated from u3x_fixes.cpp ... do not edit by hand ===== */` to the end of the file is
-assembly the maintainer's build makes from `u3x_fixes.cpp`. Never edit it, and never commit a regenerated copy of it:
-every build rewrites it.
+**The generated block.** The maintainer's build compiles `u3x_fixes.cpp`, together with private parts that are not
+in this repository, to assembly and puts it at the end of `u3_lan_profiles.c` as one block (from the line
+`/* ===== u3x (C++): generated from u3x_fixes.cpp ... do not edit by hand ===== */` to the end of the file). That
+block is not published: the `u3_lan_profiles.c` here ends with a short note where it goes. Never add or commit such a
+block.
+
+**Tests.** The old-versus-new tests that used to be in `tests/` are retired: the code they compared against has been
+replaced. The group tests that check the helper now are maintainer-only and are run before every helper version.
 
 How to contribute here without conflicts: [CONTRIBUTING.md, section 7](../../CONTRIBUTING.md#-7-helper-source-working-side-by-side).
-
-## Running the test
-
-```bash
-cd u3mp/helper-source
-grep -v '^#define U3X_FN \|^#define U3X_RO \|^#define U3X_BSS ' u3x_fixes.cpp > tests/u3x_fixes_for_test.inc
-cd tests && clang++ -std=c++20 -O1 rewrite_test.cpp -o rt && ./rt && clang++ -std=c++20 -O2 rewrite_test.cpp -o rt && ./rt
-```
-
-`u3x_fixes_for_test.inc` and `rt` are generated: do not commit them.

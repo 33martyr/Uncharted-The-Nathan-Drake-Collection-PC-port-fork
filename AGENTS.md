@@ -76,13 +76,14 @@ When you work for a contributor:
 - **Never make a helper version.** No new or renamed `u3mp/patcher/build/v*` folder, no `build.json` change, no
   version number. Only the maintainer ships helper versions, once per batch, after merging the helper PRs.
 - **Never edit or commit the generated block** at the end of `u3_lan_profiles.c` (from the line
-  `u3x (C++): generated from u3x_fixes.cpp` to the end), `tests/u3x_fixes_for_test.inc` or any built file.
+  `u3x (C++): generated from u3x_fixes.cpp` to the end; it is not published, the file ends with a note there) or any
+  built file.
 - **Write only between the contributor markers:** C++ in `u3x_fixes.cpp` above `===== end of contributor section
   =====`; `u3x_` prototypes and `U3H` exports in their contributor blocks in `u3_lan_profiles.c`. Outside them, only
   turn the C function you ported into a one-line wrapper that calls your `u3x_` function. Never change the three
   lines after an end marker. The maintainer's agent appends only at the very end of `u3x_fixes.cpp`.
-- **Port only the rows assigned to your contributor**, and add an old-versus-new test as a new
-  `tests/rewrite_test_bNN.inc` for each one.
+- **Port only the rows assigned to your contributor.** The old-versus-new tests (`tests/`) are retired; the group
+  tests are maintainer-only.
 
 ## Other rules
 

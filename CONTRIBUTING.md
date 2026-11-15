@@ -121,9 +121,9 @@ The details:
 **Only the maintainer makes helper versions.**
 - Never change a helper version: no new or renamed `u3mp/patcher/build/v*` folder, no `build.json`, no version
   number anywhere. The maintainer merges the open helper PRs, then makes **one** new helper version per batch.
-- Never commit a built helper or anything generated: not `profile-helper.bin`, not `tests/u3x_fixes_for_test.inc`,
-  and not the generated block at the end of `u3_lan_profiles.c` (from the line `u3x (C++): generated from
-  u3x_fixes.cpp` to the end of the file).
+- Never commit a built helper or anything generated: not `profile-helper.bin`, and no generated block at the end of `u3_lan_profiles.c` (from the line `u3x (C++): generated from
+  u3x_fixes.cpp` to the end of the file). The maintainer's build adds that block locally; it is not published, and
+  the file here ends with a note where it goes.
 
 **Write only in your own places.**
 - New C++ goes into `u3x_fixes.cpp` between `===== contributor section =====` and
@@ -139,13 +139,13 @@ The details:
 
 **Pull requests.**
 1. Sync your fork and start a branch from the latest `main` for each batch of rows.
-2. Port, then run the old-versus-new test (how: the [helper source README](u3mp/helper-source/README.md)). Add your
-   test as a new `tests/rewrite_test_bNN.inc` (take the next free number) with its `#include` and `batchNN();` call
-   in `rewrite_test.cpp`, and stub every new `u3h_` import in `tests/rewrite_test_b27.inc`.
-3. Open the PR with the rows you ported and the test result. The maintainer reviews, merges, builds, checks it in
+2. Port the rows. The old-versus-new tests that used to be in `u3mp/helper-source/tests/` are retired (see the
+   [helper source README](u3mp/helper-source/README.md)); the group tests are maintainer-only, and the maintainer
+   runs them on your change.
+3. Open the PR with the rows you ported. The maintainer reviews, merges, builds, checks it in
    the game and ships the next helper version with it.
 4. After a new helper version ships, update your branch from `main` (`git pull --rebase` on your branch) before you
-   continue. Your sections and wrappers carry over; only the generated block changes, and you never touch it.
+   continue. Your sections and wrappers carry over.
 
 ---
 

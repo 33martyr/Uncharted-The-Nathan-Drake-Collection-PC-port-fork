@@ -8,85 +8,10 @@
 #pragma clang section rodata=".rodata.ext"   /* agent C constants go to the ext code segment (main helper area is nearly full) */
 
 
-/* ---- c002 kind 100: PS3 1.19 f_317d8c "late join closed?" (1.10 f_318624, PS4 0x7462b0) ----
- * PS4 0x7462b0 is the 1.10 function. 1.19 changes it for game type 10 (Elimination) only:
- *  1.19 0x317d8c (decompiled): (a) remaining-time fraction < 0.25 -> true (as 1.10); (b) type 15 and DAT_0124b848 > 3 -> true
- *  (as 1.10, only moved first); (c) NEW: type 10 -> true when the leading team's round wins *(s16)(teamrec + 0x16) > 1
- *  (S19 + 0x5980 + lead*0x130 + 0x16; 1.10 / PS4 layout S + 0x5c0e + lead*0x130 = PS4 0x17e338e + lead*0x130, the same
- *  field 1.10/PS4 read for the score test) or when rounds - 1 <= current round (1.19 mgr+0x554c / +0x534c = 1.10
- *  mgr+0x5c24 / +0x5a20 = PS4 mgr+0x6a44 / +0x66fc (setter 0x73a9b0, reset 0x73bb30)). c003 fix: rounds is +0x6a44, not
- *  +0x6a40: 1.10 f_316a30 0x317290.. compares +0x5a20 < +0x5c24 exactly where 1.19 0x31d8e4.. compares +0x534c < +0x554c, and
- *  PS4 0x725759/0x725769 compares [mgr+0x66fc] with [mgr+0x6a44] in the same block; otherwise
- *  type 10 skips the 0.75 score test and goes to the co-op tail (f_310c68 co-op mask 0x72b1: type 10 is not in it) -> false.
- * Every other type gives the 1.10 answer, so the hook only answers type 10 and lets the native run for the rest.
- * The lead team comes from PS4 0x737eb0 (= PS3 1.19 f_313fa8 = 1.10 f_318200), -1 on a tie. PS3 indexes with it in 32-bit
- * arithmetic (the read lands 0x130 bytes before team 0, still inside the score manager); the signed index here reads the same
- * PS4 field (no x86 fault, unlike the native's zero-extended index that needs the tie guard at 0x74654e).
- * Floats: PS3 multiplies by 1/300 (0x3b5a740e); PS4's native divides by 300. Switch U3MP_ELIM119=0 (ec[0] bit1). */
-EXT static int latejoin_closed119(uintptr_t base,ProfileState *s,uint64_t *regs){
- X.ec[18]++;
- if(X.ec[0]&2)return 0;
- uint8_t *mgr=(uint8_t*)regs[4];
- if(mgr!=(uint8_t*)(base+0x17cb060u)||netgame_type(base,s)!=10)return 0;
- if(!mp_code_is(base,0x726b00u,"554889e54157415641545349")||!mp_code_is(base,0x737eb0u,"554889e54157415641545348"))return 0;
- void (*left)(int32_t*,uint8_t*)=(void(*)(int32_t*,uint8_t*))(base+0x726b00u);   /* PS3 f_313b14 / 1.10 f_3099ac */
- int32_t a[2]={0,0};left(a,mgr);   /* v7.116 C++: the round clock is read once */
- int r=u3x_round_mostly_over(a[0],*(int32_t*)(base+0x17b4ca4u)-*(int32_t*)(base+0x17d5c64u));
- if(!r){
-  int32_t lead=((int32_t(*)(uint8_t*))(base+0x737eb0u))(mgr);
-  int16_t wins=*(int16_t*)(base+0x17e338eu+(int64_t)lead*0x130);
-  int32_t rounds=*(int32_t*)(mgr+0x6a44),round=*(int32_t*)(mgr+0x66fc);
-  X.ec[21]=(uint32_t)lead;X.ec[22]=(uint32_t)(int32_t)wins;X.ec[23]=(uint32_t)(round&0xffff)|((uint32_t)rounds<<16);
-  r=u3x_match_nearly_decided(wins,rounds,round);}
- X.ec[19]++;X.ec[20]=(uint32_t)r;
- regs[8]=(uint64_t)r;return 1;}
+EXT static int latejoin_closed119(uintptr_t base,ProfileState *s,uint64_t *regs){return u3x_latejoin_closed(base,s,regs);}   /* v7.213 C++ (G35) */
 
-/* ---- c003: PS3 1.19 Elimination "Waiting for new players" (new in 1.19; 1.10 / PS4 never set the flag) ----
- * 1.19 match update 0x31d084 (= 1.10 f_316a30, inlined by PS4 into the net task 0x7230f0), block 0x31d8e4..: game type 10 with
- * rounds (mgr+0x554c > 0) and current round < rounds: f_30dabc(mgr, &winner) decides the round end (PS4 inlines it at
- * 0x7257da..0x7259a9 and calls the round-end send 0x6bcfc0(reason, winner) = 1.19 f_2f79d4 = 1.10 f_2f0acc at 0x7259af).
- * NEW in 1.19, before that call: for each of the 10 net players (MP active, 1.19 f_368308(np,0) = 1.10 f_359cc4 = in game:
- * np+0xe1 && !np+0x5e4) with np+0x471 set and np+0x472 clear (PS4 +0x5f9 / +0x5fa: joined, not yet spawned in this round):
- * the round end is cancelled (reason = 0) and, while mgr+0x1d4 is clear, f_301ecc(mgr) runs; the round ends only when no such
- * player is left. 1.19 f_301ecc (new): if !mgr+0x1d4 { if host (f_3257ec -> f_304f68) send net message type 0x98 (f_2f2cd8,
- * empty payload, vtable 0x10f7838, receiver 0x2ceae4 calls f_301ecc on clients); mgr+0x1d4 = 1; timer mgr+0x1d8 = 60 s }.
- * mgr+0x1d4 = 1.10 +0x1d4 = PS4 mgr+0x354 (cleared at round start: 1.10 f_315108 0x31516c, PS4 0x73afd6), timer +0x358.
- * The net task 1.19 0x31df64 (0x31e014..0x31e068) shows HUD text 0x02277bd7 "Waiting for new players" on screen 0 while the
- * flag is set and that HUD message is not already up (f_65e438: *(u8*)(*(hud+300)+0x2384) != 0; show f_65f444(hud, text, -1,
- * 0) -> f_66671c). PS4's own inline of the same show (0x73a0af..0x73a11c, 1.10 f_66c94c): current HUD 0x1806480 and
- * 0x1b24bd8 = hud 0x1805fa0, element *(hud+0x238)+0x25f0: strncpy 0x80, +0x7f = 0, +0x84 colour, +0x80 = *(0x17b4ba4),
- * +0x88 = +0x8c = 0, +0x90 = arg 4; text = 0xf32ae0(0x17026b8, id) or [0x17026b8+0x10].
- * NOT ported here: message type 0x98 (PS4's message factory 0x6c2b50 stops at 0x96; it belongs with the LAN backend port, a solo
- * host has no client to tell). Switch U3MP_ELIM_WAIT=0 (ec[0] bit2) leaves the whole feature out.
- * Diagnostics: ec[24] kind-101 calls, ec[25] round ends held, ec[26] waiting set, ec[27] texts shown. */
-static void elim_wait_set(uintptr_t base){   /* PS3 1.19 f_301ecc (message send left out, see above) */
- lnb_elim_tx=1;   /* x052: PS3 f_301ecc sends message 0x98 */
- uint8_t *mgr=(uint8_t*)(base+0x17cb060u);
- if(mgr[0x354])return;
- mgr[0x354]=1;*(int32_t*)(mgr+0x358)=*(int32_t*)(base+0x17b4ca4u)+60*300;X.ec[26]++;}
-EXT static int elim_round_end_hold(uintptr_t base,ProfileState *s,uint64_t *regs){
- (void)s;(void)regs;X.ec[24]++;
- if(X.ec[0]&4)return 0;
- uint8_t *mgr=(uint8_t*)(base+0x17cb060u);int hold=0;
- for(int i=0;i<10;i++){
-  if(!*(uint8_t*)(base+0x17d5c61u))continue;
-  uint8_t *np=mgr+0x390+(int64_t)i*0x9c0;
-  if(u3x_waiting_joiner(np)){hold=1;   /* v7.123 C++ */if(!mgr[0x354])elim_wait_set(base);}}
- if(!hold)return 0;
- X.ec[25]++;regs[8]=0;return 1;}
-EXT static void elim_wait_text(uintptr_t base){
- if(X.ec[0]&4)return;
- if(lnb_elim_rx){lnb_elim_rx=0;elim_wait_set(base);lnb_elim_tx=0;}   /* x052: guest */
- if(!*(uint8_t*)(base+0x17cb060u+0x354))return;
- uint8_t *hud=(uint8_t*)(base+0x1805fa0u);uint8_t *eo=*(uint8_t**)(hud+0x238);if(!eo)return;
- uint8_t *el=eo+0x25f0;if(el[0])return;
- if(!mp_code_is(base,0xf32ae0u,"554889e541565389f34989fe")||!mp_code_is(base,0x139c740u,"ff25826c3400681a000000e9"))return;
- const char *t=((const char*(*)(uintptr_t,uint32_t))(base+0xf32ae0u))(base+0x17026b8u,0x02277bd7u);
- if(!t)t=*(const char**)(base+0x17026b8u+0x10);if(!t)return;
- *(uint8_t**)(base+0x1806480u)=hud;*(uint8_t**)(base+0x1b24bd8u)=hud;
- ((void(*)(void*,const char*,uint64_t))(base+0x139c740u))(el,t,0x80);
- el[0x7f]=0;*(uint32_t*)(el+0x84)=0xffffffffu;*(uint32_t*)(el+0x80)=*(uint32_t*)(base+0x17b4ba4u);
- *(uint32_t*)(el+0x88)=0;*(uint32_t*)(el+0x8c)=0;el[0x90]=0;X.ec[27]++;}
+EXT static int elim_round_end_hold(uintptr_t base,ProfileState *s,uint64_t *regs){(void)s;return u3x_elim_round_end_hold(base,regs);}   /* v7.213 C++ (G35) */
+EXT static void elim_wait_text(uintptr_t base){u3x_elim_wait_text(base);}   /* v7.213 C++ (G35) */
 
 /* ---- c004: PS3 NetGameManager::Init (1.10 f_305d2c; 1.19 0x3115e0), called by NetInit f_2901e0 at 0x290714 ----
  * PS4 has no copy, and nothing on PS4 writes these fields before the match code reads them (PS4's NetInit is gone; the
@@ -142,51 +67,15 @@ static const char taunt_rows119[]=
  "multi-celebrate-cossack-dance\0multi-celebrate-six-flags\0multi-celebrate-carlton-2\0multi-celebrate-bolt\0"
  "multi-celebrate-freddie\0multi-celebrate-dougie\0multi-celebrate-cabbage-patch\0multi-celebrate-cheerleader\0"
  "multi-celebrate-gangnam\0multi-celebrate-top-model\0";
-static struct{uint8_t *tc;uint32_t pid,prev;} taunt_prev119[8] EXT_BSS;
 static const char *taunt_row_name119(uint32_t row){
- return u3x_nth_name(taunt_rows119,row);}   /* v7.133 C++ */
-static void taunt_want119(uintptr_t base,uint32_t id){   /* PS3 1.19 f_30af18 */
- if(id==0x0e69839du)return;
- if(!mp_code_is(base,0x11f31b0u,"554889e54156534883ec1049")||!mp_code_is(base,0x10e95b0u,"554889e54157415641554154")||
-    !mp_code_is(base,0x10ebb90u,"554889e54157415653504989"))return;
- uint8_t *t=((uint8_t*(*)(uint32_t,uint32_t,uint32_t))(base+0x11f31b0u))(0xb2b6e512u,0x4240ef2eu,0);
- if(!t)return;
- uint32_t n=*(uint32_t*)t;uint8_t *e=*(uint8_t**)(t+8);
- for(uint32_t i=1;i<n;i++){
-  if(*(uint32_t*)(e+(size_t)i*12)!=id)continue;
-  uint32_t (*hash)(uint64_t,const char*,uint64_t)=*(uint32_t(**)(uint64_t,const char*,uint64_t))(base+0x1702720u);
-  const char *nm=taunt_row_name119(i);
-  if(!nm||!hash||hash(0,nm,0)!=id){X.ec[34]++;return;}
-  uint64_t w[3];
-  w[0]=((uint64_t(*)(const char*))(base+0x10e95b0u))(nm);
-  *(uint32_t*)((uint8_t*)w+8)=hash(0,nm,0);*(uint16_t*)((uint8_t*)w+0xc)=0;*(uint16_t*)((uint8_t*)w+0xe)=0;w[2]=0;
-  ((uint8_t*)w)[0xe]=1;                                     /* every name is < 0x40 chars (the PS3 assert) */
-  ((void(*)(uintptr_t,uint64_t*))(base+0x10ebb90u))(base+0x1afcf10u,w);
-  X.ec[32]++;X.ec[33]=id;return;}}
-static uint32_t taunt_prev_get119(uint8_t *tc){
- uint8_t *pl=*(uint8_t**)(tc+0x118);uint32_t pid=pl?*(uint32_t*)(pl+0x7c):0;
- return u3x_taunt_previous(taunt_prev119,tc,pid);}   /* v7.133 C++ */   /* 1.19 ctor 0x573bf8 starts +0x70 at 0 */
+ return u3x_nth_name(taunt_rows119,row);}   /* v7.133 C++; read by u3h_taunt_row_name */
+static void taunt_want119(uintptr_t base,uint32_t id){u3x_taunt_want(base,id);}   /* PS3 1.19 f_30af18; r2 G54 C++ */
 /* kind 104: PS4 vt5 Start 0xb85010 at its store 0xb85126 (mov [r14+0x128],esi), arg = controller (r14): 1.19 0x57447c's
  * "+0x70 = +0x74" before the new id is stored. */
-EXT static void taunt_start_rec119(uintptr_t base,uint8_t *tc){
- (void)base;if(!tc)return;
- uint8_t *pl=*(uint8_t**)(tc+0x118);uint32_t pid=pl?*(uint32_t*)(pl+0x7c):0;
- int k=u3x_taunt_slot(taunt_prev119,tc,pid,X.ec[35]);   /* v7.133 C++ */
- taunt_prev119[k].tc=tc;taunt_prev119[k].pid=pid;taunt_prev119[k].prev=*(uint32_t*)(tc+0x128);
- X.ec[35]++;X.ec[36]=taunt_prev119[k].prev;}
+EXT static void taunt_start_rec119(uintptr_t base,uint8_t *tc){u3x_taunt_start_record(base,tc);}   /* r2 G54 C++ */
 /* kind 103: PS4 match setup 0x72b570 at 0x72d12d (right after the anim-proto-multiplayer want, before anim-proto-shield) =
  * PS3 1.19 0x3204a8..0x32054c. */
-EXT static void match_taunt_wants119(uintptr_t base){
- X.ec[31]++;
- if(X.ec[0]&8)return;
- uint64_t h=*(uint64_t*)(base+0x1bb9500u);uint32_t id=*(uint32_t*)(base+0x1bb9508u);
- if(!h||!id)return;
- uint8_t *p=*(uint8_t**)h;
- if(!p||*(uint32_t*)(p+0x7c)!=id)return;                    /* f_41eb00(0) == 0 */
- uint8_t *tc=*(uint8_t**)(p+0x6e8);if(!tc)return;
- uint32_t (*vt6)(uint8_t*)=(uint32_t(*)(uint8_t*))(*(uintptr_t**)tc)[6];   /* PS4 0xb85000: +0x128 */
- taunt_want119(base,vt6(tc));
- if(p[0xcea])taunt_want119(base,taunt_prev_get119(tc));}   /* 1.19 vt7: +0x70 */
+EXT static void match_taunt_wants119(uintptr_t base){u3x_match_taunt_wants(base);}   /* r2 G54 C++ */
 
 /* ---- c006: PS3 1.19 player info message 0x3a additions, per-net-player taunt wants, hat stats ----
  * Player info. 1.19 SendPlayerInfo 0x2fc150 (= 1.10 f_2f4fd8 = PS4 0x6b7b30) builds message 0x3a with 0xc0 bytes (1.10:
@@ -236,10 +125,6 @@ EXT static void match_taunt_wants119(uintptr_t base){
  * ec[43] last processed slot | hatoff<<8 | f112<<9, ec[44] last taunt received, ec[45] kind-109/110 runs, ec[46] boosters
  * skipped (b), ec[47] hat entries added, ec[48] rebuilds that saw the table, ec[49] cap hits, ec[40]/ec[41] trampolines. */
 static struct{uint32_t taunt;uint8_t rank,hatoff,f112,set;} np119[10] EXT_BSS;
-static uint32_t zero119 EXT_BSS;
-static int np_slot119(uintptr_t base,uint8_t *np){
- intptr_t d=(intptr_t)(np-(uint8_t*)(base+0x17cb060u+0x390u));
- if(d<0||d%0x9c0||d/0x9c0>=10)return -1;return (int)(d/0x9c0);}
 /* kind 105: PS4 SendPlayerInfo 0x6b7b30 at 0x6b846c (lea rdi,[0x17d6420] before the send 0x7a2ef0), arg = message (r13). */
 EXT static void pinfo_send119(uintptr_t base,uint8_t *msg){
  u3x_pinfo_send(base,msg);}   /* v7.159 C++ */
@@ -254,32 +139,9 @@ EXT static void np_taunt_want119(uintptr_t base,uint8_t *np){
  u3x_np_taunt_want(base,np);}   /* v7.159 C++ */
 /* kind 113: 0x78f589 in the booster loop (rax = booster record), value stub; returns 0 (replay), rewriting rdx/rcx so the
  * replayed "mov eax,[rdx+rcx+4]" reads zero for the booster 1.19 skips. */
-EXT static int booster_skip119(uintptr_t base,ProfileState *s,uint64_t *regs){
- if(X.ec[0]&64)return 0;
- uint8_t *rec=(uint8_t*)regs[8];
- if(rec&&*(uint32_t*)(rec+4)==0xdff8181fu&&netgame_type(base,s)==0x13){
-  regs[6]=(uint64_t)(uintptr_t)&zero119-4;regs[7]=0;X.ec[46]++;}
- return 0;}
+EXT static int booster_skip119(uintptr_t base,ProfileState *s,uint64_t *regs){return u3x_booster_skip(base,s,regs);}   /* r2 G53 C++ */
 /* kind 112: modifier rebuild exit 0x78f8b3, arg = net player (r12). */
-EXT static void hat_mods119(uintptr_t base,ProfileState *s,uint8_t *np){
- if(X.ec[0]&64)return;
- if(!np)return;
- int i=np_slot119(base,np);
- /* f_2a3eb0 */
- uint8_t *mgr=(uint8_t*)(base+0x17cb060u);
- if(!*(uint8_t*)(base+0x17d5c58u+9)||!*(uint32_t*)(mgr+0x6808))return;
- uint8_t *ng=netgame_cur(base,s);if(ng&&*(uint32_t*)(ng+0x6c))return;
- if(!mp_code_is(base,0x784b20u,"554889e54156534889fb400f")||!mp_code_is(base,0x9952a0u,"554889e54157415641554154"))return;
- if(!((uint8_t(*)(uint8_t*))(base+0x73fbc0u))(mgr))return;
- uint8_t *t=sym_table(s,0xb8a3581bu);
- if(!t||(i>=0&&np119[i].hatoff))return;
- X.ec[48]++;
- uint8_t *look=((uint8_t*(*)(uint8_t*,uint32_t))(base+0x784b20u))(np,0);if(!look)return;
- int32_t n=*(int32_t*)t;uint8_t *rows=*(uint8_t**)(t+8);if(!rows)return;
- for(int sl=2;sl<=6;sl++){
-  uint32_t *it=((uint32_t*(*)(uint64_t,uint32_t,uint32_t,uint32_t,uint32_t))(base+0x9952a0u))(0,look[0],look[1],(uint32_t)(sl-2),look[sl]);
-  if(!it)continue;
-  if(u3x_add_hat_mods(np,rows,n,*it,(uint32_t)sl,(uint32_t*)&X.ec[47])<0){X.ec[49]++;return;}}}   /* v7.136 C++ */
+EXT static void hat_mods119(uintptr_t base,ProfileState *s,uint8_t *np){u3x_hat_mods(base,s,np);}   /* r2 G53 C++ */
 
 /* ---- c007: PS3 1.19 spotter booster per local screen (1.19 0x370bc4 block 0x371894..0x3719d4; 1.10 f_361fc4) ----
  * 1.10 (and PS4 0x789a60, inline loop 0x78ecc7..0x78ee4e, booster 0x1ca807a radius via 0x689d20 = 1.10 f_29e7f4): for each
@@ -302,13 +164,6 @@ EXT static void hat_mods119(uintptr_t base,ProfileState *s,uint8_t *np){
  * Switch U3MP_SPOT119=0 (ec[0] bit7): kind 114 runs PS4's own single-flag loop. Diagnostics: ec[50] loop runs, ec[51]
  * flag[0] sets, ec[52] flag[1] sets, ec[53] reads on screen 1. */
 static uint8_t spot1_119[10] EXT_BSS;
-static uint32_t call_f32_119(uintptr_t fn,uintptr_t a0,uint64_t a1,uintptr_t a2,uint64_t a3){
- uint32_t r;register uint64_t rdi __asm__("rdi")=a0;register uint64_t rsi __asm__("rsi")=a1;register uint64_t rdx __asm__("rdx")=a2;
- register uint64_t rcx __asm__("rcx")=a3;register uint64_t rax __asm__("rax")=fn;
- __asm__ volatile("push %%rbp\n\tmov %%rsp,%%rbp\n\tand $-16,%%rsp\n\tcall *%%rax\n\tmov %%rbp,%%rsp\n\tpop %%rbp\n\tmovd %%xmm0,%%eax"
-  :"+a"(rax),"+D"(rdi),"+S"(rsi),"+d"(rdx),"+c"(rcx)::"r8","r9","r10","r11","xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7",
-   "xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15","memory","cc");
- r=(uint32_t)rax;return r;}
 /* kind 114: 0x78ecc7 (spotter r13 alive, before the radius query); continues at 0x78ee54. */
 EXT static void spotter119(uintptr_t base,ProfileState *s,uint8_t *sp){
  u3x_spotter(base,s,sp);}   /* v7.152 C++ */
@@ -383,11 +238,6 @@ static int anim_lookup119(uintptr_t base,uint32_t *tab,int32_t *idx,uint32_t id,
  * The inverse walks the same tables; the root anim is PS4 0xfd62a0(chunk skel +0x40, clip id, root id) = PS3 f_7fb034
  * (as PS4's AnimStreamLoginBuffer 0xfd49d4 calls it). Returns 0 for any anim that is not a chunk, as PS3. */
 static uint8_t *stream_root119(uintptr_t base,uint8_t *x,uint32_t *phase){return u3x_stream_root(base,x,phase);}   /* v7.212 C++ */
-/* 1.19 f_2bf8d0(layer marker): 0 for the listed layer ids (and 0xa4c69580), else 1 */
-static int layer_counts119(uint32_t u){
- static const uint32_t ex[]={0x2eaa36bc,0xb49deb95,0xd7d78739,0x2dcf3713,0x89207057,0x7efa5a21,0x4f0cff90,0xdd631c58,0xd8376565,
-  0x0cc6cf18,0x0f4a46d3,0xa4c69580};
- return u3x_layer_counts(u,ex,sizeof(ex)/4);}   /* v7.212 C++ */
 /* PS3 command types -> PS4 (CreateAnimCmds 0xfbe270 / emitters 0xfc68d0, 0xfcdaa0, 0xfd2360): 2->3, 3->4, 6->8 (anim u64 @+4,
  * layer @+0xc, frame @+0x10), 0x16->0x1b (same + @+0x14), 9->0xc (layer @+4), 10->0xd (layer @+4), 7->9 (@+4..+0x10, f @+0x14),
  * 8->0xa (@+4), 0x14->0x19 (layer id @+4), 0x15->0x1a. PS3 0xc (callback-emitted) has no PS4 producer. */
@@ -408,40 +258,11 @@ static uint32_t anim_pack119(uintptr_t base,uint8_t *msg,uint8_t *bs,uint8_t *ac
  uint8_t *buf=0;return anim_pack_body119(base,msg,bs,actor,tabs,param5,param6,&buf);}   /* v7.98: buf is kept */
 static uint32_t anim_pack_body119(uintptr_t base,uint8_t *msg,uint8_t *bs,uint8_t *actor,uint8_t **tabs,int param5,int param6,uint8_t **buf){
  return u3x_anim_pack_body(base,msg,bs,actor,tabs,param5,param6,buf);}   /* v7.212 C++ */
-/* 1.19 f_3054e8(mgr, item): the item's index in the 20-entry weapon table (PS3 1.19 0xdb92a0; PS4 0x13a6170 is the 1.10
- * 19-entry table, so 1.19's is embedded), else 0x14 + its index in DC list 0x9e354807 (f_6ddea4 -> PS4 0x11f2e30), else 0 */
-static const uint32_t wtab119[20]={0,0xb934b2b2,0xdf95da88,0x11a89844,0xe54acfed,0x08be7587,0xc58ae515,0x472bca9a,0x16980e31,
- 0xb17d9450,0x159df996,0x3304ff7e,0xb92c70b5,0x22bf34f2,0xdba957f1,0x702b5d67,0x5806b4f9,0x284e1009,0x3304ff7e,0x2daa4324};
-static uint32_t witem119(uintptr_t base,uint32_t id){   /* v7.136 C++ */
- for(int i=0;i<20;i++)if(wtab119[i]==id)return (uint32_t)i;
- return u3x_weapon_number_119(wtab119,((uint8_t*(*)(uint32_t))(base+0x11f2e30u))(0x9e354807u),id);}
-static uint8_t *vget119(uint8_t *o,uint32_t off){return ((uint8_t*(*)(uint8_t*))(*(uintptr_t**)o)[off/8])(o);}
-static uint64_t vget1_119(uint8_t *o,uint32_t off,uint64_t a){return ((uint64_t(*)(uint8_t*,uint64_t))(*(uintptr_t**)o)[off/8])(o,a);}
 /* 1.19 f_2cf964(msg, player): weapons. Player+0x520 (PS3 +0x3d8) vt+0x70 (PS3 vt+0x38) = weapon in slot i (as PS4 0x78bbb7);
  * weapon item id +0x6ec (PS3 +0x568, f_6dd758), +0x6f0 (+0x56c), +0x6f2 (+0x56e), vt+0x438 (PS3 vt+0x210), vt+0x398
  * (vt+0x1c4): the gun vtable 0x16af910 lines up with PS3 0x1102218 entry by entry, PS4 inserts one virtual at 0x430; the
  * pair is checked by body: PS3 f_6d1bf8 = 2 or a +0x698/+0x6b8 bit, PS4 0xd49d40 = 2 or a +0x888/+0x8ac bit. */
-static void weapons119(uintptr_t base,uint8_t *msg,uint8_t *pl){
- uint8_t *wc=*(uint8_t**)(pl+0x520),*w;
- if((w=(uint8_t*)vget1_119(wc,0x70,0))){*(uint32_t*)(msg+0x1f0)=witem119(base,*(uint32_t*)(w+0x6ec));msg[0x231]=w[0x6f0];msg[0x233]=w[0x6f2];
-  msg[0x234]=(uint8_t)(uintptr_t)vget119(w,0x438);}
- if((w=(uint8_t*)vget1_119(wc,0x70,1))){*(uint32_t*)(msg+0x1f4)=witem119(base,*(uint32_t*)(w+0x6ec));msg[0x230]=w[0x6f0];msg[0x232]=w[0x6f2];
-  msg[0x235]=(uint8_t)(uintptr_t)vget119(w,0x438);}
- if((w=(uint8_t*)vget1_119(wc,0x70,2))){if((int32_t)(uintptr_t)vget119(w,0x398)>0)*(uint32_t*)(msg+0x1f8)=witem119(base,*(uint32_t*)(w+0x6ec));}
- if((w=(uint8_t*)vget1_119(wc,0x70,5)))*(uint32_t*)(msg+0x1fc)=witem119(base,*(uint32_t*)(w+0x6ec));
- /* +0x688 (PS3 +0x48c) vt+0x120(0) (PS3 vt+0x90) held object of type 0x310f465e (PS4 0x6c789c does the same query):
-  * f_16df0 as PS4 inlines it (0x6bd727): its spawner's name (vt+0xe8 -> +0x28; PS3 vt+0x74 -> +0x24) else obj+0x440 (+0x330) */
- uint8_t *o=(uint8_t*)vget1_119(*(uint8_t**)(pl+0x688),0x120,0);
- if(o&&*(uint32_t*)(o+0x30)==0x310f465eu){uint8_t *e=vget119(o,0xe8);*(uint32_t*)(msg+0x208)=e?*(uint32_t*)(e+0x28):*(uint32_t*)(o+0x440);}
- uint32_t m=(uint32_t)(uintptr_t)vget119(wc,0x60);
- *(uint32_t*)(msg+0x200)=u3x_weapon_mode_119(m);   /* v7.136 C++ */
- *(uint32_t*)(msg+0x204)=(uint32_t)(uintptr_t)vget119(wc,0x198);   /* PS3 vt+0xc8 (f_56492c +0x144 = PS4 0xbb1440 +0x244; one virtual inserted before) */
- /* f_59d5c4 = PS4 0xba57f0: AnimControl (+0x138) +0x40 -> +0x10 -> float +0x120 (PS3 +0x30 -> +8 -> +0x118; PS3 asserts) */
- {uint8_t *ac=*(uint8_t**)(pl+0x138),*a2=ac?*(uint8_t**)(ac+0x40):0,*a3=a2?*(uint8_t**)(a2+0x10):0;
-  *(uint32_t*)(msg+0x15c)=a3?*(uint32_t*)(a3+0x120):0;if(!a3)X.ec[69]++;}
- *(uint32_t*)(msg+0x20c)=0;
- uint8_t *cv=*(uint8_t**)(pl+0x5f8);                    /* PS3 +0x444 vt+0x34 / vt+0x38 */
- if((uint8_t)(uintptr_t)vget119(cv,0x68))*(uint32_t*)(msg+0x20c)=((uint8_t)(uintptr_t)vget119(cv,0x70))?2:1;}
+static void weapons119(uintptr_t base,uint8_t *msg,uint8_t *pl){u3x_weapons_fill(base,msg,pl);}   /* r2 G48 */
 /* 1.19 f_958ba8(char, sid) as PS4 inlines it (0x9fb2ff): char+0x80 (PS3 +0x54) -> *p -> +0x10 -> +0x18 == sid */
 static int has_eff119(uint8_t *c,uint32_t sid){return u3x_has_eff(c,sid);}   /* v7.212 C++ */
 /* 1.19 f_30a2d4(mgr, char): the net player of a character (MP only): Player -> local np of its screen; NetCharacter
@@ -772,9 +593,6 @@ static const uint8_t er119_zero[64]={0};
  *    answers "not a worker" -> 0x1c1f308. */
 /* v7.209 C++: sin / cos, the number conversions, engine temp memory, DDS files, the DC binds, the records and the CPU
  * rasterizer are u3x_* in u3x_fixes.cpp; the record arrays stay here while the C emblem code uses them */
-EXT static uint32_t f_fma119(uint32_t a,uint32_t b,uint32_t c){uint32_t r;__asm__("movd %1,%%xmm0\n\tmovd %2,%%xmm1\n\tmovd %3,%%xmm2\n\t"   /* still used by C code elsewhere */
- "cvtss2sd %%xmm0,%%xmm0\n\tcvtss2sd %%xmm1,%%xmm1\n\tcvtss2sd %%xmm2,%%xmm2\n\tmulsd %%xmm1,%%xmm0\n\taddsd %%xmm2,%%xmm0\n\t"
- "cvtsd2ss %%xmm0,%%xmm0\n\tmovd %%xmm0,%0":"=r"(r):"r"(a),"r"(b),"r"(c):"xmm0","xmm1","xmm2");return r;}
 static uint32_t sincos119(uint32_t x,uint32_t flag){return u3x_sincos119(x,flag);}
 EXT static uint32_t h16q16_119(uint32_t f){return u3x_h16q16(f);}
 EXT static void *emb_alloc119(uintptr_t b,uint64_t n){return u3x_emb_alloc(b,n);}
@@ -829,9 +647,6 @@ EXT static void emb_tick119(uintptr_t b,ProfileState *s){
 /* NetInit: f_27d610 (default record 4x4, zeroed by f_27d5b8, + table binds) then the worker's f_27d5b8 (memset, pin 0, binds) */
 EXT static int emb_netinit119(uintptr_t b,ProfileState *s){
  return u3x_emblem_netinit(b,s);}   /* v7.179 C++ */
-/* NetShutdown f_280f68 0x281038: f_27cb54 */
-EXT static void emb_shutdown119(uintptr_t b){
- u3x_emblem_shutdown(b);}   /* v7.179 C++ */
 /* PS3 f_302bd0(mgr, team, 1) as PS4 inlines it in 0x6a5c50 (f_3885c8 = the 0x17e2864 / 0x17e384c lookup, default 0x1b7f114) */
 EXT static uint8_t *emb_teamnp119(uintptr_t b,int32_t team){
  return u3x_emblem_team_player(b,team);}   /* v7.160 C++ */
@@ -846,17 +661,8 @@ EXT static int emb_look119(uintptr_t b,ProfileState *s,uint64_t *regs){
  (void)s;return u3x_emblem_look(b,regs);}   /* v7.160 C++ */
 /* 1.19 f_217000 stat lines. Kind 249 0x61a3f1: ds/row; kind 250 0x61a638: draw. PS3 draws them whatever the Hat Stats setting is. */
 /* v7.199 C++: the stat lines are u3x_hs_* in u3x_fixes.cpp (with their text buffer) */
-static uint32_t hd_n EXT_BSS,hd_c EXT_BSS;
 EXT static void hs_save119(uintptr_t base,ProfileState *s,uint64_t *regs){u3x_hs_save(base,s,regs);}   /* x097: kind 249, 0x61a402 */
 EXT static void hs_draw119(uintptr_t base,ProfileState *s,uint64_t *regs){u3x_hs_draw(base,s,regs);}   /* x102: kind 250, 0x61a638 */
-/* hat colour: PS4's tint guard 0x759505 fails on 'none' parts; apply the preview look directly (x098) */
-EXT static void h01_tint(uintptr_t base,uint8_t *cm,uint8_t *ch,int32_t side){
- uint64_t *l=(uint64_t*)(ch+0x1c40),old[5];int diff=0;hd_n++;
- for(int i=0;i<5;i++)old[i]=l[i];
- if(active_page(base)==0xcbe59a09u){uint64_t *p=(uint64_t*)(cm+0xf78+(size_t)side*0x28);for(int i=0;i<5;i++)l[i]=p[i];}
- else ((void(*)(void*))(base+0x9964d0u))(cm);
- for(int i=0;i<5;i++)diff|=l[i]!=old[i];
- if(diff){hd_c++;((void(*)(void*))(base+0xbc9e50u))(ch);}}
 /* ===== wall emblems as NdSimpleObject actors (prototype: air-multi). Paste into agc_port.inc right after emb_look119.
  * PS3 f_31444c (0x31444c): np = f_302bd0(mgr, f_313fa8(mgr), 1), else f_3025a0(mgr, 0) when mgr+0x5534 == 0 (PS4 offset of that
  * flag not located, so the fallback is unconditional here); instances named *-blackboard take np+0x660, the others np+0x664,

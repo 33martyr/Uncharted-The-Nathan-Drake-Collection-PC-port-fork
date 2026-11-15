@@ -48,7 +48,6 @@ static int f_le(uint32_t a,uint32_t b){int r;__asm__("movd %1,%%xmm0\n\tmovd %2,
 #define F_16 0x41800000u
 #define F_1_16 0x3d800000u
 
-static uint32_t kr_bits(ProfileState *s){return *(uint32_t*)((uint8_t*)s+0x3d78);}
 /* v5.43 PS3 f_9f3654(tags, sid) as PS4 inlines it (0x9f8d1c): tag table built flag 0x1b3efd8, the sid's bucket list at
    0x1b3efd8+bucket (circular, the head itself is the end), node +0x10 sid, +0x14 bit; bit set in tags+0x20[bit>>6]. */
 static int kr_tag(uintptr_t base,uint8_t *tags,uint32_t sid,uint32_t bucket){
@@ -64,62 +63,30 @@ static uint8_t *kr_ng(uintptr_t base){return (uint8_t*)(base+0x17cb060u);}
 static uint8_t *kr_S(uintptr_t base){return (uint8_t*)(base+0x17dd780u);}
 static KRec *kr_rec(uint8_t *S,uint32_t i){return (KRec*)(S+0xe4+(uint64_t)i*0x28);}
 static uint32_t kr_n(uint8_t *S){return *(uint32_t*)(S+0xe0);}
-/* PS3 f_358c3c: net player id */
-static uint32_t kr_pid(uint8_t *np){return u3x_net_player_id(np);}   /* v7.131 C++ */
-static int32_t kr_team(uint8_t *np){return *(int32_t*)(np+0x21c);}
-static uint32_t kr_user(uint8_t *np){return *(uint32_t*)(np+0x1e8);}
 /* PS3 f_30089c */
-static uint8_t *kr_np_by_id(uintptr_t base,uint32_t id){
- if(!id)return 0;
- for(int i=0;i<10;i++){uint8_t *np=kr_ng(base)+0x390+(uint64_t)i*0x9c0;if(kr_pid(np)==id)return np;}
- return 0;}
-/* PS3 f_359694 (compares with both local slots, even when np is 0, as PS3 does) */
-static int kr_local(uintptr_t base,uint8_t *np){
- uint8_t *ng=kr_ng(base);return np==*(uint8_t**)(ng+0x370)||np==*(uint8_t**)(ng+0x378);}
+static uint8_t *kr_np_by_id(uintptr_t base,uint32_t id){return u3x_kr_np_by_id(base,id);}   /* r2 G44 */
 /* PS3 f_359cc4(np,0) */
 static int kr_active(uint8_t *np){return u3x_net_player_in_game(np);}   /* v7.131 C++ */
-/* PS3 f_2f8af4 / f_2f9ea0 */
-static uint8_t *kr_np_at(uintptr_t base,uint32_t i){
- if(!*(uint8_t*)(base+0x17d5c61u)||i>9)return 0;return kr_ng(base)+0x390+(uint64_t)i*0x9c0;}
 /* current mode entry (PS3 f_300a40 = PS4 0x721050) and its type (+0xc) */
 static uint8_t *kr_mode(uintptr_t base){return ((uint8_t*(*)(void*))(base+0x721050u))(kr_ng(base));}
 static int32_t kr_mode_type(uintptr_t base){uint8_t *m=kr_mode(base);return m?*(int32_t*)(m+0xc):-1;}
 /* PS3 f_3081a4: same player, or same team (never in mode type 0xe) */
-static int kr_friendly(uintptr_t base,uint8_t *a,uint8_t *b){
- if(a==b)return 1;if(kr_mode_type(base)==0xe)return 0;
- if(a&&b)return kr_team(a)==kr_team(b);return 0;}
-static int kr_online(uintptr_t base){return ((uint8_t(*)(void*))(base+0x7270f0u))(kr_ng(base))!=0;}
+static int kr_friendly(uintptr_t base,uint8_t *a,uint8_t *b){return u3x_kr_friendly(base,a,b);}   /* r2 G44 */
 /* PS3 f_30feec */
-static int kr_30feec(uintptr_t base){
- if(kr_mode_type(base)==0xd)return 1;
- return ((uint32_t(*)(void*))(base+0x7424a0u))(kr_ng(base))==0x4b720b62u;}
+static int kr_30feec(uintptr_t base){return u3x_kr_30feec(base);}   /* r2 G44 */
 /* member table index / record (PS3 loops over S+0x50e4 comparing f_358c3c; default record 0x125ed48) */
-static int kr_member(uint8_t *S,uint32_t id){return u3x_score_member(S,id);}   /* v7.131 C++ */
-static uint8_t *kr_prec(uint8_t *S,uint8_t *np){
- if(np){int i=kr_member(S,kr_pid(np));if(i>=0)return S+0x60cc+(uint64_t)i*0x130;}
- return X.krdummy;}
+static uint8_t *kr_prec(uint8_t *S,uint8_t *np){return u3x_kr_prec(S,np);}   /* r2 G44 */
 /* stat index <-> weapon sid (PS3 f_2fc84c / f_2fc74c, PS4 0x7ad280 GetWeaponIdByStatIndex) */
 static uint32_t *kr_wlist(uintptr_t base){uint64_t *p=((uint64_t*(*)(uint32_t))(base+0x11f2bf0u))(0x9e354807u);return p?(uint32_t*)*p:0;}
 static uint32_t kr_statidx(uintptr_t base,uint32_t sid){
  return u3x_weapon_stat_number((const uint32_t*)(base+0x13a6170u),kr_wlist(base),sid);}   /* v7.131 C++ */
-static uint32_t kr_statw(uintptr_t base,uint32_t idx){
- return u3x_weapon_for_stat((const uint32_t*)(base+0x13a6170u),idx<0x13?0:kr_wlist(base),idx);}   /* v7.131 C++ */
-static int kr_group6(uint32_t w){return u3x_weapon_group(w)==6;}   /* v7.131 C++ */
-static int kr_group4(uint32_t w){return u3x_weapon_group(w)==4;}
+static uint32_t kr_statw(uintptr_t base,uint32_t idx){return u3x_kr_statw(base,idx);}   /* r2 S09 C++ */
 /* stat event (PS3 f_59c94(0x11f45b0,id,amount,np,0) = PS4 0x5ae4e0) */
-static void kr_stat(uintptr_t base,ProfileState *s,uint32_t id,uint32_t amount,uint8_t *np){
- X.kr[2]++;X.krs[X.kr[3]++&15]=id;
- if(kr_bits(s)&KR_NOSTAT)return;
- ((void(*)(void*,uint32_t,uint32_t,void*,uint32_t))(base+0x5ae4e0u))(0,id,amount,np,0);}
+static void kr_stat(uintptr_t base,ProfileState *s,uint32_t id,uint32_t amount,uint8_t *np){u3x_kr_stat(base,(void*)s,id,amount,np);}   /* r2 G44 */
 /* PS3 f_709b14: sid continued with a string (crc32, msb first, table 0x13a6ff0) */
-static uint32_t kr_sid_cat(uintptr_t base,uint32_t h,const char *str){
- const uint32_t *t=(const uint32_t*)(base+0x13a6ff0u);
- while(*str){h=(h&0xffffff)<<8^t[((h>>24)^(uint8_t)*str)&0xff];str++;}return h;}
+static uint32_t kr_sid_cat(uintptr_t base,uint32_t h,const char *str){return u3x_kr_sid_cat(base,h,str);}   /* r2 G44 */
 /* PS3 f_37b428: profile counter data+8+n*4 (PS4 profile object *(0x17dd610)+user*0x7b00, data at +0x248) */
-static void kr_prof_add(uintptr_t base,uint8_t *np,uint32_t n,uint32_t amt){
- if(!kr_online(base))return;
- uint8_t *obj=*(uint8_t**)(base+0x17dd610u);if(!obj)return;
- obj+=(uint64_t)kr_user(np)*0x7b00;*(uint32_t*)(obj+0x250+n*4)+=amt;X.kr[9]++;}
+static void kr_prof_add(uintptr_t base,uint8_t *np,uint32_t n,uint32_t amt){u3x_kr_prof_add(base,np,n,amt);}   /* r2 G44 */
 static uint32_t kr_now(uintptr_t base){uint8_t *c=*(uint8_t**)(base+0x17c3580u);return c?*(uint32_t*)(c+0xc):0;}
 
 /* ---- medal sub-checks (PS3 0x379xxx..0x381xxx) ---- */
