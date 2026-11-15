@@ -802,6 +802,10 @@ B build48(const std::string &mod, const std::vector<uint32_t> &groups, const B &
         const int64_t gb = int64_t(d.size());
         app(d, rootb);
         putle(d, gb + 0x10, n, 4);
+        // root +0x08 is the group's own string id: the game's module unload finds a group's entry in its group table
+        // by this word. A copied root kept the first group's id, so the new groups stayed in the table after their
+        // module was unloaded and the next load of the module read freed memory (crash after a Sanctuary match).
+        putle(d, gb + 0x08, g, 4);
         const int64_t Aa = int64_t(d.size());
         app(d, le(1, 4));
         app(d, le(0, 4));

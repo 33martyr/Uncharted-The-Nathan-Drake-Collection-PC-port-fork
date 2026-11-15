@@ -46,7 +46,7 @@ tables where PS3 holds a constant-kind entry).
 After batch48, every PS3 part module (newest layer, test modules aside) is compared with its PS4 module (the batch48
 result, else retail): every PS3 group whose emitter list the PS4 module lacks or lists otherwise gets the PS3 list,
 and every emitter of it the PS4 module lacks is converted (the same emitter converter) and appended; a group PS4 lacks
-gets a copy of the module's first group root with its own name, count and list. Emitters without a name in
+gets a copy of the module's first group root with its own name, id (root +0x08: the game's module unload finds the group by it), count and list. Emitters without a name in
 emitter-names.tsv are named `u3mp-ps3/<sid>` (the game finds them by the symbol table's string id). An emitter the
 converter cannot place (the PS3 +0x58 pointer variant, a PS3 material missing from mattab.tsv) is left out of its groups.
 Result: 8 modules (adv-fort, adv-fort-cistern, cave, gompa, multiplayer, obj-shade, ruins, shambhala); 125 of the 130
