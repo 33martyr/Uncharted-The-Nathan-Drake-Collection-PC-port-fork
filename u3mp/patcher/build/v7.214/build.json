@@ -1,17 +1,17 @@
 {
- "version": "7.213",
+ "version": "7.214",
  "game": "Uncharted: The Nathan Drake Collection CUSA02320 (EU) / CUSA02343 (US) 1.02",
  "executable": "big3-ps4_Shipping.elf",
  "self_sha256": "02c111aa7e73e445d71a1ad861702811f31d471abc61caf01732d55a77eb1c38",
  "base_sha256": "64466a99fa91bf49da3498e3df016b4f84f298e0929a3b4ab797bd3282dd9fbc",
  "menu_shell_sha256": "8979cc0d2e0590d61bdf7935ab8c29e617010aa2aa096584cd868d004058554b",
- "image_sha256": "3c4dc359ab34415be34c7ea12f2f9b41f9732c387c9f019f7ee2810a4b1a585c",
+ "image_sha256": "ee8fdee11d820c3aa2d6eeebc1ce6a8d485c8846d98f69275f630919f89a4cb8",
  "env": {
   "U3MP_N033": "2",
   "U3MP_LAN_LOOP": "0",
   "U3MP_ONLINE_MM": "1"
  },
  "files": {
-  "link.json": "2f300e36a24cf17c57e7b396d63b89e756388543bd500e5af3cea3fbaedfc7c6"
+  "link.json": "9faf51c861df6919f7d4f22ef7a1250fd926018b06057ef82c2615c45cb0ef61"
  }
 }
