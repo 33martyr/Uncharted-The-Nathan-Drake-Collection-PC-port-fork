@@ -52,6 +52,7 @@ constexpr uint64_t kDrawCall = 0x3fc52d;
 constexpr uint64_t kNetGameManager = 0x113b760;
 constexpr uint64_t kNetGameIndex = kNetGameManager + 0x1ca0;
 constexpr uint64_t kNetGameOverrides = kNetGameManager + 0x21b4;
+constexpr uint64_t kCurve = 0x1139fe0;  // copied from DC c85e199d; a zero count divides by zero in StartNetGame
 constexpr uint64_t kTextDatabase = 0x1066660;
 constexpr uint64_t kDataRoot = 0x104ad28;
 constexpr uint64_t kFrameCounter = 0x1116180 + 0x104;
@@ -137,6 +138,14 @@ template <typename T> T peek(uint64_t offset) {
     return v;
 }
 template <typename T> void poke(uint64_t offset, T v) { std::memcpy(image.base + offset, &v, sizeof v); }
+
+void repair_curve() {
+    const int32_t count = peek<int32_t>(kCurve);
+    if (count > 0) return;
+    log("playing: curve count %d, using the 5-entry fallback", count);
+    poke<int32_t>(kCurve, 5);
+    std::memset(image.base + kCurve + 4, 0, 0x2c);
+}
 template <typename T> T peek_abs(const uint8_t *p) {
     T v;
     std::memcpy(&v, p, sizeof v);
@@ -614,8 +623,8 @@ void submit_quad(const Card &card, const Point screen[4], const float u[4], cons
         alignas(16) uint64_t info[4] = {uint64_t(uintptr_t(card.material)), 0, 0, 0};
         guest<void(U2MP_GUEST *)(uint8_t *, uint64_t *, uint8_t *)>(fMaterialQuad)(ctx48, info, quad);
     } else {
-        guest<void(U2MP_GUEST *)(void *, void *, uint8_t *, int)>(fSlotQuad)(image.base + kDrawCtx, nullptr, quad,
-                                                                             card.type == 1 ? 8 : 10);
+        guest<void(U2MP_GUEST *)(void *, void *, int, uint8_t *)>(fSlotQuad)(
+            image.base + kDrawCtx, nullptr, card.type == 1 ? 8 : 10, quad);
     }
 }
 
@@ -984,7 +993,10 @@ template <int I> U2MP_GUEST uint64_t state_hook(void *state) {
         return result;
     }
     record_request(false, kSlots[I].name);
-    return original(state);
+    if constexpr (I == 4) repair_curve();
+    const uint64_t result = original(state);
+    if constexpr (I == 4) repair_curve();
+    return result;
 }
 constexpr StateFn kHooks[6] = {&state_hook<0>, &state_hook<1>, &state_hook<2>,
                                &state_hook<3>, &state_hook<4>, &state_hook<5>};

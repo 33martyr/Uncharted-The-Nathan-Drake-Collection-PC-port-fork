@@ -192,6 +192,7 @@ function has the signature `void (u32 *event)`; event[0] is the event number, 6 
 | ngm +0x10 | 10 trackers of 0x2c0 | player trackers |
 | ngm +0x1ca0 | s16 | current net game (-1 none) |
 | tracker +0x20 | char[64] | name (first byte 0 = free) |
+| tracker +0x60 / +0xa0 | char[64] | display name / message-list second name |
 | tracker +0x120 | u32 | net id |
 | tracker +0x238 | u32 | cleared to 0 |
 | tracker +0x23c | s32 | connection key (-1 = local) |
@@ -426,9 +427,10 @@ rank/team, last seen NET_SM, the frame and rate-log counters, the net clock obje
 - Add tracker (net id, name, local): find the first tracker i (0..9) whose name byte is non-zero and
   whose net id equals; if none, the first tracker whose name byte is zero. None at all: log
   `no free player slot for %s` (name) and stop. Otherwise, with t = ngm+0x10+i*0x2c0: guest
-  `0x662a30(t)`; write name into t+0x20 as a C string limited to 64 bytes including the terminator
-  (`Player` if name is empty); t+0x120 = net id; t+0x238 = 0; t+0x23c = -1 if local else net id;
-  t+0x26c = 0; t+0x275 = 1; t+0x27c = 1; if local, ngm+0 = guest address of t; if net id == host id,
+  `0x662a30(t)`; write name into t+0x20 and the message-list second name at t+0xa0 as C strings
+  limited to 64 bytes including the terminator (`Player` if name is empty); t+0x120 = net id;
+  t+0x238 = 0; t+0x23c = -1 if local else net id; t+0x26c = 0; t+0x275 = 1; t+0x27c = 1; if
+  local, ngm+0 = guest address of t; if net id == host id,
   ngm+8 = guest address of t. Log `player %s: net id %u, slot %d%s` with the given name (empty stays
   empty in the log), net id, i, and ` (local)` or empty.
 - Fill trackers: add tracker for every used member in slot order, local = (net id == my net id).
@@ -598,11 +600,16 @@ record with that level id (no early stop). Stop if none, if shorter than 4 chars
 `-pak`, or if find package(sid(name)) finds it. File wait (state kept across calls): when sid(name)
 differs from the remembered id, remember it, remember now (steady_clock), and test whether the guest
 file `/app0/u2data/build/main/pak22/ps4/<name>-ingame10.pak` exists (`runtime_file_translate` into a
-1024-byte buffer returns 0 and `fopen(..., "rb")` succeeds). If the file exists and less than 20 s
-have passed since that remembered time: stop. If the file exists (20 s passed): once per id, log
-`load levels: %s has a file but no package after 20 s (not registered?): not waited for`. Then for each
-wait-list-0 entry (at most min(count, 256), pointer non-NULL) with id == sid(name) and flag bit 0
-clear: set bit 0 and log `load levels: %s is defined nowhere (no registry entry, no file): not waited for`.
+1024-byte buffer returns 0 and `fopen(..., "rb")` succeeds). If the file exists and the cached
+`load_levels_diagnostics` busy flag is set: once per id, log
+`load levels: requesting %s while the loader is busy`, request the package with
+`request_package(name)`, and stop (the loader is still working; do not set its wait entry skipped). If
+the file exists, the loader is not busy, and less than 20 s have passed since that remembered time:
+stop. If the file exists
+(20 s passed): once per id, log `load levels: %s has a file but no package after 20 s (not registered?):
+not waited for`. Then for each wait-list-0 entry (at most min(count, 256), pointer non-NULL) with id ==
+sid(name) and flag bit 0 clear: set bit 0 and log
+`load levels: %s is defined nowhere (no registry entry, no file): not waited for`.
 
 ### 5.10 Abort wrapper
 

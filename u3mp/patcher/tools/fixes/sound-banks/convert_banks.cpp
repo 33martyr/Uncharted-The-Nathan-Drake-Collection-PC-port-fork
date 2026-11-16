@@ -44,6 +44,10 @@ uint16_t rbe16(const Bytes &d, size_t o) {
     if (o + 2 > d.size()) throw Stop("struct.error: unpack_from requires a buffer of at least 2 bytes");
     return uint16_t(d[o] << 8 | d[o + 1]);
 }
+uint32_t rle32(const Bytes &d, size_t o) {
+    return uint32_t(d[o]) | uint32_t(d[o + 1]) << 8 | uint32_t(d[o + 2]) << 16 | uint32_t(d[o + 3]) << 24;
+}
+uint16_t rle16(const Bytes &d, size_t o) { return uint16_t(d[o] | d[o + 1] << 8); }
 Bytes sub(const Bytes &d, size_t a, size_t b) {   // d[a:b]
     a = std::min(a, d.size());
     b = std::min(std::max(a, b), d.size());
@@ -353,8 +357,10 @@ Bytes convert(const Bytes &d) {
             gr4.push_back(e);
         };
         if (t == 0x19) {
+            const bool empty = g[1] == 0;
             entry(0x30u << 24 | uint32_t(gd4.size()));
-            Bytes blk{g[1], g[2], g[3], uint8_t((g[1] - 1) & 0xff), 0};
+            Bytes blk{uint8_t(empty ? 0 : g[1]), uint8_t(empty ? 0 : g[2]), uint8_t(empty ? 0 : g[3]),
+                      uint8_t(empty ? 0 : (g[1] - 1)), 0};
             blk.insert(blk.end(), 16, 0xff);
             blk.insert(blk.end(), 3, 0);
             app(gd4, blk);
@@ -431,6 +437,24 @@ Bytes convert(const Bytes &d) {
     return out;
 }
 
+// U2 stream blocks set a chain marker that makes the engine walk the envelope table as links; the converted 0x2d
+// blocks have no chain data there, so the marker must be cleared or the walk loops on the envelope's first float.
+void clear_u2_stream_chain(Bytes &d) {
+    constexpr size_t s = 0x20;
+    if (d.size() < s + 0x40 || std::memcmp(d.data() + s, "SBlk", 4)) return;
+    const uint32_t go = rle32(d, s + 0x1c), gdo = rle32(d, s + 0x2c);
+    const uint16_t ngr = rle16(d, s + 0x3a);
+    for (uint32_t i = 0; i < ngr; i++) {
+        const size_t e = s + go + 8ull * i;
+        if (e + 8 > d.size()) return;
+        const uint32_t w = rle32(d, e);
+        if ((w >> 24) != 0x2d) continue;
+        const size_t b = s + size_t(gdo) + (w & 0xffffff);
+        if (b + 0x4c > d.size() || !(rle32(d, b + 0x48) & 0x40)) continue;
+        d[b + 0x13] &= 0xfe;
+    }
+}
+
 }  // namespace
 
 // one PS3 bank converted (the Uncharted 2 import): the envelope table from adsr_env.json (read once). Throws Stop.
@@ -444,7 +468,8 @@ Bytes sound_bank_convert(const Bytes &ps3, const std::string &, const fs::path &
             g_env.push_back({{uint32_t(std::stoul(k.substr(0, c), nullptr, 16)), uint32_t(std::stoul(k.substr(c + 1), nullptr, 16))}, v.s});
         }
     }
-    const Bytes out = convert(ps3);
+    Bytes out = convert(ps3);
+    clear_u2_stream_chain(out);
     const size_t s = be32(ps3, 8);
     note = fmt("SBlk v%u -> v13, %u sounds, %u grains", be32(ps3, s + 4), be32(ps3, s + 20), be32(ps3, s + 24) >> 16);
     return out;

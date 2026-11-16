@@ -91,9 +91,47 @@ std::string thread_name(DWORD id) {
 }
 
 struct Stack {
-    std::vector<std::string> native, game;
-    bool operator<(const Stack &o) const { return native != o.native ? native < o.native : game < o.game; }
+    std::vector<std::string> native, game, regs;
+    bool operator<(const Stack &o) const {
+        if (native != o.native) return native < o.native;
+        if (game != o.game) return game < o.game;
+        return regs < o.regs;
+    }
 };
+
+std::string reg(uint64_t v, const std::vector<Module> &modules, uint64_t guest, uint64_t guest_size) {
+    return place(v, modules, guest, guest_size);
+}
+
+void read_bytes(HANDLE process, uint64_t address, void *out, size_t size) {
+    SIZE_T got = 0;
+    if (!ReadProcessMemory(process, (LPCVOID)address, out, size, &got) || got != size) std::memset(out, 0, size);
+}
+
+std::string loop_state(HANDLE process, const CONTEXT &ctx, const std::vector<Module> &modules, uint64_t guest,
+                       uint64_t guest_size) {
+    const uint64_t off = ctx.Rip - guest;
+    if (!guest || off < 0x16dcd0 || off > 0x16dce1) return std::string();
+    uint32_t node[2] = {}, block[4] = {}, entry_word = 0, field48 = 0;
+    uint16_t flags = 0;
+    uint64_t entry = 0;
+    read_bytes(process, ctx.Rax, node, sizeof node);
+    read_bytes(process, ctx.R12, block, sizeof block);
+    read_bytes(process, ctx.R13 + 8, &entry, sizeof entry);
+    if (entry) read_bytes(process, entry, &entry_word, sizeof entry_word);
+    read_bytes(process, ctx.R14 + ctx.Rbx + 0x12, &flags, sizeof flags);
+    read_bytes(process, ctx.R14 + ctx.Rbx + 0x48, &field48, sizeof field48);
+    char b[640];
+    std::snprintf(b, sizeof b,
+                  "loop: rax=%s [rax]=%#x [rax+4]=%#x ecx=%#x edx=%#x r12=%s [r12]=%#x r14=%s rbx=%#llx "
+                  "entry=%s [entry]=%#x type=%#x flags=%#x field48=%#x block=%08x %08x %08x %08x",
+                  reg(ctx.Rax, modules, guest, guest_size).c_str(), node[0], node[1], (unsigned)ctx.Rcx,
+                  (unsigned)ctx.Rdx, reg(ctx.R12, modules, guest, guest_size).c_str(), block[0],
+                  reg(ctx.R14, modules, guest, guest_size).c_str(), (unsigned long long)ctx.Rbx,
+                  reg(entry, modules, guest, guest_size).c_str(), entry_word, (unsigned)(entry_word >> 24), flags, field48,
+                  block[0], block[1], block[2], block[3]);
+    return b;
+}
 
 Stack walk(HANDLE process, HANDLE thread, const std::vector<Module> &modules, uint64_t guest, uint64_t guest_size) {
     Stack s;
@@ -102,7 +140,27 @@ Stack walk(HANDLE process, HANDLE thread, const std::vector<Module> &modules, ui
     if (!GetThreadContext(thread, &ctx)) return s;
     // guest frames: each rbp points at {caller's rbp, return address}; stop when the chain stops going up the stack
     uint64_t rbp = ctx.Rbp;
-    if (guest && ctx.Rip >= guest && ctx.Rip < guest + guest_size) s.game.push_back(hex(ctx.Rip - guest));
+    if (guest && ctx.Rip >= guest && ctx.Rip < guest + guest_size) {
+        s.game.push_back(hex(ctx.Rip - guest));
+        const std::string loop = loop_state(process, ctx, modules, guest, guest_size);
+        if (!loop.empty()) {
+            char b[512];
+            std::snprintf(b, sizeof b,
+                          "regs: rip=%s rsp=%s rbp=%s rax=%s rbx=%s rcx=%s rdx=%s rsi=%s rdi=%s "
+                          "r8=%s r9=%s r10=%s r11=%s r12=%s r13=%s r14=%s r15=%s",
+                          reg(ctx.Rip, modules, guest, guest_size).c_str(),
+                          reg(ctx.Rsp, modules, guest, guest_size).c_str(), reg(ctx.Rbp, modules, guest, guest_size).c_str(),
+                          reg(ctx.Rax, modules, guest, guest_size).c_str(), reg(ctx.Rbx, modules, guest, guest_size).c_str(),
+                          reg(ctx.Rcx, modules, guest, guest_size).c_str(), reg(ctx.Rdx, modules, guest, guest_size).c_str(),
+                          reg(ctx.Rsi, modules, guest, guest_size).c_str(), reg(ctx.Rdi, modules, guest, guest_size).c_str(),
+                          reg(ctx.R8, modules, guest, guest_size).c_str(), reg(ctx.R9, modules, guest, guest_size).c_str(),
+                          reg(ctx.R10, modules, guest, guest_size).c_str(), reg(ctx.R11, modules, guest, guest_size).c_str(),
+                          reg(ctx.R12, modules, guest, guest_size).c_str(), reg(ctx.R13, modules, guest, guest_size).c_str(),
+                          reg(ctx.R14, modules, guest, guest_size).c_str(), reg(ctx.R15, modules, guest, guest_size).c_str());
+            s.regs.push_back(b);
+            s.regs.push_back(loop);
+        }
+    }
     for (int i = 0; i < MAX_FRAMES && rbp; ++i) {
         uint64_t pair[2];
         SIZE_T got = 0;
@@ -182,6 +240,7 @@ UN_API int un_thread_report(unsigned long pid, unsigned long long guest_base, un
                 (who.size() > 6 ? " (+" + std::to_string(who.size() - 6) + " more)" : std::string()) + ":\n";
         text += "    host: " + (s.native.empty() ? std::string("(stack unavailable)") : joined(s.native, " <- ")) + "\n";
         if (!s.game.empty()) text += "    guest: " + joined(s.game, " <- ") + "\n";
+        for (const std::string &r : s.regs) text += "    " + r + "\n";
     }
     return give(text, out, cap);
 }

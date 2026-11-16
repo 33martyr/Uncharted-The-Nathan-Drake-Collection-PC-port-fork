@@ -1305,7 +1305,7 @@ int main(int argc, char **argv) {
     int guest_argc=1;
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;
-    const char *app0_overlays[4]; int app0_overlay_count=0;
+    const char *app0_overlays[8]; int app0_overlay_count=0;
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "--cpu-only")) cpu_only = 1;
         else if (!strcmp(argv[i], "--strict-imports")) strict_imports = 1;
@@ -1315,7 +1315,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--content-profile") && i+1<argc) content_profile=argv[++i];
         else if (!strcmp(argv[i], "--app0") && i+1<argc) app0=argv[++i];
         else if (!strcmp(argv[i], "--app0-overlay") && i+1<argc) {
-            if (app0_overlay_count==4) { fprintf(stderr, "Too many --app0-overlay options\n"); return 1; }
+            if (app0_overlay_count==8) { fprintf(stderr, "Too many --app0-overlay options\n"); return 1; }
             app0_overlays[app0_overlay_count++]=argv[++i];
         }
         else if (!strcmp(argv[i], "--user") && i+1<argc) user_dir=argv[++i];

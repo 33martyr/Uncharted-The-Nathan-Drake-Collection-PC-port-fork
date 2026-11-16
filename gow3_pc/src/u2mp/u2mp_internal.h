@@ -74,6 +74,7 @@ void install_hud(int &installed);       // hud.cpp: multiplayer HUD draw, PS3 0x
 void install_scoreboard(int &installed); // scoreboard.cpp: in-match scoreboard, PS3 0x4cbf00 / 0x4cbc10
 void install_rosternames(int &installed); // rosternames.cpp: player display names in the team lists (NetStatGame +0x3918)
 void install_matchend(int &installed); // matchend.cpp: match-end watch, test time limit (PORT-GAMEPLAY3.md 6)
+void install_solocoop(int &installed); // solocoop.cpp: co-op minimum players 2 -> 1
 void install_gameplay3(int &installed); // gameplay3.cpp: ShowResults::Enter + results countdown (PORT-GAMEPLAY3.md)
 void install_nullsites(int &installed); // nullsites.cpp: replay stream fallback at WaitReady::Exit (PORT-NULLSITES.md)
 void install_netpatch(int &installed);  // netpatch.cpp: the PS3 server live-data module net-patch9 (PORT-NETPATCH.md)

@@ -283,10 +283,10 @@ NetGameManager `0x113b760`: `+0x00` local tracker*, `+0x08` host tracker*, 10 tr
 
 Registration: `AddOrUpdateNetPlayer 0x642370(ngm, session, member)` (PS3 `0x49ada8`) is
 **dead** and its name copy is `strncpy(tracker+0x20, NULL, 64)` - do not call it. Port it: pick
-the slot with the same net id or the first free one, `0x662a30(tracker)`, write name (+0x20),
-net id (+0x120), key (+0x23c), +0x238, and set `[ngm]`/`[ngm+8]` when the net id equals the
-local/host id. `RemoveNetPlayer` = `0x6422c0(ngm, slot)` (-> `0x662a30`), `ClearNetPlayers
-0x63db90`.
+the slot with the same net id or the first free one, `0x662a30(tracker)`, write name (+0x20)
+and the message-list second name (+0xa0), net id (+0x120), key (+0x23c), +0x238, and set
+`[ngm]`/`[ngm+8]` when the net id equals the local/host id. `RemoveNetPlayer` = `0x6422c0(ngm, slot)`
+(-> `0x662a30`), `ClearNetPlayers 0x63db90`.
 
 Connection handshake on PS3 (absent on PS4): `NpNetUpdate 0x43bdd0` sends StartConnection
 (`0x489c50`, via NetSession send `0x4d3754`; Apply `0x474e50` sets flag `0xf12620`), clients
