@@ -1,8 +1,6 @@
 # Uncharted: The Nathan Drake Collection PC — With Multiplayer 
 
-<p align="center">
-  <img src="assets/nathan-drake-banner.png" alt="Golden Nathan Drake silhouette on charcoal" width="800">
-</p>
+![Uncharted 2 and Uncharted 3](assets/uncharted-gallery.png)
 
 <p align="center">
   <a href="https://recomplauncher.com/game/uncharted-the-nathan-drake-collection-pc-port-2">
