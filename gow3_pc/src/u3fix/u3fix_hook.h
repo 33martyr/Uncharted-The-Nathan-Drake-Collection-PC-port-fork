@@ -24,5 +24,7 @@ bool exposure_filter_at_least_one(unsigned char *image, uint64_t size);
 bool user_switch(const char *word);
 // the PS3 improved tonemap curve: rewrites the tonemap constants when the render settings ask for it (tonemap_curve.cpp)
 bool improved_tonemap_curve(float *constants, const unsigned char *settings, bool t1_curve, bool display = true);
+// the default choice: the improved curve where the render settings' exposure maximum is at least 2 (not Borneo co-op)
+bool improved_curve_by_default(const unsigned char *settings);
 
 }  // namespace u3fix

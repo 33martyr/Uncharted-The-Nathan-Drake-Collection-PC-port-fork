@@ -16,7 +16,7 @@
 // runs right after that last store and, when the curve applies, rewrites c0, c1, c4..c6 and folds the exposure and the
 // black point into the levels scale and offset, as PS3 does. It does nothing while the game's "T1 style filmic curve"
 // debug switch is off (the builder then uses a fixed curve of its own instead of the render settings).
-// Default since 15 Nov 2026: the filmic curve; the improved curve only on request (install_improved_tonemap_curve).
+// Default since 16 Nov 2026: the improved curve as a display value, except for Borneo co-op's render settings (filmic).
 #include "u3fix.h"
 #include "u3fix_hook.h"
 
@@ -70,6 +70,17 @@ bool improved_tonemap_curve(float *constants, const unsigned char *settings, boo
     return true;
 }
 
+// The default: the improved curve as a display value for the render settings that use it, except Borneo's. Of the
+// multiplayer and co-op render settings that turn the improved curve on (Museum, Ruins, Warzone and Borneo: dig-adv,
+// dig-coop-stage), Borneo's alone keep the auto exposure below 2 EV (range 0.25..1.75; the others reach 2.25 to 4.875).
+// The owner's tests (15 / 16 Nov 2026): Museum shown with the improved curve is close to PS3, Borneo with it far too dark
+// and right with the filmic curve. So the curve applies when the exposure maximum (+0x6f8) is at least 2.
+bool improved_curve_by_default(const unsigned char *settings) {
+    float mx;
+    std::memcpy(&mx, settings + 0x6f8, 4);
+    return mx >= 2.0f;
+}
+
 namespace {
 
 std::atomic<uint64_t> g_frames{0};
@@ -119,7 +130,9 @@ void log_settings(const unsigned char *settings, uint32_t t1_curve) {
     std::fflush(stdout);
 }
 
-std::atomic<int> g_mode{0};   // 0 filmic (no rewrite), 1 improved curve as a display value, 2 improved curve then gamma
+// 0 filmic (no rewrite), 1 improved curve as a display value, 2 improved curve then gamma, 3 (default) the improved curve
+// as a display value where improved_curve_by_default says so, else filmic
+std::atomic<int> g_mode{3};
 
 }  // namespace
 
@@ -168,9 +181,9 @@ namespace {
 // called from the stub with the constant block (r12), the render settings (rbx) and the T1 switch (r15b)
 __attribute__((sysv_abi)) void tonemap_hook(float *constants, const unsigned char *settings, uint32_t t1_curve) {
     if (settings) log_settings(settings, t1_curve);
-    if (!constants || !settings ||
-        g_mode.load(std::memory_order_relaxed) == 0 ||
-        !improved_tonemap_curve(constants, settings, (t1_curve & 0xff) != 0, g_mode.load(std::memory_order_relaxed) == 1))
+    const int mode = g_mode.load(std::memory_order_relaxed);
+    if (!constants || !settings || mode == 0 || (mode == 3 && !improved_curve_by_default(settings)) ||
+        !improved_tonemap_curve(constants, settings, (t1_curve & 0xff) != 0, mode != 2))
         return;
     g_frames.fetch_add(1, std::memory_order_relaxed);
     uint32_t bias_bits;
@@ -219,15 +232,17 @@ void xmm_slot(unsigned char *p, unsigned &n, unsigned reg, int32_t disp, bool st
 }  // namespace
 
 bool install_improved_tonemap_curve(unsigned char *image, uint64_t size) {
-    // Default: the PS4 filmic curve, as retail PS4 draws every level (owner's tests, 15 Nov 2026: Borneo co-op looked
-    // right only with the filmic curve; with the improved curve gamma-encoded again it was too light, shown as a
-    // display value far too dark). The hook is still installed for the "tonemap settings" log; it rewrites the
-    // constants only on request: tonemap-improved (the curve as a display value) or tonemap-gamma (its own constants,
-    // then the shader's gamma) in u3-switches.txt, or UNCHARTED_IMPROVED_TONEMAP=1 / =gamma.
+    // Default: the improved curve as a display value where the render settings use it, except Borneo's
+    // (improved_curve_by_default); Borneo co-op keeps the PS4 filmic curve (owner's tests, 15 / 16 Nov 2026: Borneo
+    // right only with the filmic curve, Museum close to PS3 with the improved one). Words in u3-switches.txt:
+    // tonemap-filmic (or UNCHARTED_IMPROVED_TONEMAP=0) the filmic curve everywhere; tonemap-improved (=1) the improved
+    // curve as a display value everywhere it is on, Borneo too; tonemap-gamma (=gamma) its own constants, then the gamma.
     const char *env = std::getenv("UNCHARTED_IMPROVED_TONEMAP");
+    const bool filmic = (env && env[0] == '0') || user_switch("tonemap-filmic");
     const bool gamma = (env && std::strcmp(env, "gamma") == 0) || user_switch("tonemap-gamma");
     const bool display = (env && env[0] == '1') || user_switch("tonemap-improved");
-    g_mode.store(gamma ? 2 : display ? 1 : 0, std::memory_order_relaxed);
+    const int mode = filmic ? 0 : gamma ? 2 : display ? 1 : 3;
+    g_mode.store(mode, std::memory_order_relaxed);
     const uint64_t site = find_unique(image, size, kSite, sizeof(kSite));
     if (site == kNotFound) return false;
     unsigned char *stub = stub_page_near(image, size);
@@ -266,9 +281,10 @@ bool install_improved_tonemap_curve(unsigned char *image, uint64_t size) {
     if (!finish_stub(stub) || !jump_to(image, at, kStoreLength, stub)) return false;
     std::printf("Uncharted 3: improved tonemap curve of the render settings at the constant builder %#llx (%s)\n",
                 static_cast<unsigned long long>(at),
-                gamma     ? "improved curve, gamma-encoded again (tonemap-gamma)"
-                : display ? "improved curve as a display value (tonemap-improved)"
-                          : "filmic curve as on PS4; tonemap settings log only");
+                mode == 0   ? "filmic curve as on PS4 (tonemap-filmic); tonemap settings log only"
+                : mode == 2 ? "improved curve, gamma-encoded again (tonemap-gamma)"
+                : mode == 1 ? "improved curve as a display value everywhere (tonemap-improved)"
+                            : "improved curve as a display value, filmic where the exposure stays below 2 EV (Borneo)");
     std::fflush(stdout);
     return true;
 }

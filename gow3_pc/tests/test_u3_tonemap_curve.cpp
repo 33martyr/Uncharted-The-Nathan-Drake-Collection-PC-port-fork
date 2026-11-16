@@ -101,6 +101,14 @@ int main() {
     assert(!u3fix::improved_tonemap_curve(c, rs, false));
     assert(std::memcmp(c, before, sizeof c) == 0);
 
+    // the default choice: Borneo co-op's render settings (exposure range 0.25..1.75) keep the filmic curve; Museum
+    // (2.375..4.875), Ruins (0.25..2.25) and Warzone (-4..4) get the improved one
+    const float maxima[][2] = {{1.75f, 0}, {1.99f, 0}, {2.0f, 1}, {2.25f, 1}, {4.0f, 1}, {4.875f, 1}};
+    for (const auto &m : maxima) {
+        set_f32(rs, 0x6f8, m[0]);
+        assert(u3fix::improved_curve_by_default(rs) == (m[1] != 0));
+    }
+
     std::printf("u3-tonemap-test: %d curve points match, unused cases unchanged\n", checked);
     return 0;
 }
