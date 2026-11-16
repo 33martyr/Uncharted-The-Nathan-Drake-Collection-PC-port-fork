@@ -1,7 +1,7 @@
 ---
-name: Bug report - Uncharted 1
-about: If something doesn't work correctly with Uncharted 1
-title: "[Bug][Uncharted 1] - Enter a title here"
+name: Bug report
+about: If something doesn't work correctly
+title: "[Bug] - Enter a title here"
 labels: bug
 assignees: ''
 type: Bug
