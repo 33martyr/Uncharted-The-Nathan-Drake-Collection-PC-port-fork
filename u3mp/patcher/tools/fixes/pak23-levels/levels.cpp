@@ -25,6 +25,7 @@
 #include "texcodec.hpp"
 #include "ps4stage.hpp"
 #include "ps4writer.hpp"
+#include "../wall-emblem/wall_emblem.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -43,6 +44,13 @@ fs::path g_tmp;   // <project>/scratch/pak23-levels-work
 std::set<std::string> g_anim;   // animated actor names for the ingame converter (made once, before the workers)
 
 using Row = std::map<std::string, std::string>;
+
+// wall emblems (wall-emblem/wall_emblem.hpp): the stage row of every '<map>-multi' level the game loads (the highest
+// overlay in the whole plan); its PS3 source gives the level's emblem patches, its build gives the actors, and the
+// level's ingame12 row places one spawner per actor. Actors go to overlay-r3's actor33 (the top overlay).
+std::map<std::string, Row> g_emblem_stage;
+std::mutex g_actor_mu;
+std::map<std::pair<std::string, std::string>, std::vector<std::pair<std::string, Bytes>>> g_actors;   // (overlay, name) -> actors
 
 // The plan's sha256, or the one its note names as 'goty_sha256=<sha>': a Game of the Year disc without the DLC map packs
 // gives the DLC levels from goty-dlc.psarc, and a few of those sources differ from dlc-map1..4.psarc
@@ -309,7 +317,14 @@ Bytes build(const Row &row, const std::map<std::pair<std::string, std::string>, 
         return with_map_colors2(stage::sky_convert(sp, lv, o, upath(g_here + "/data/water_templates.json")), row.at("name"), read_file(sp));
     }
     if (m == "vischeat") return vischeat_convert(ps3_source(row, idx));   // C++ (dctools/vischeat.cpp)
-    if (m == "ingame") return ps4ingame_convert(ps3_source(row, idx), g_anim);   // C++ (dctools/ps4ingame.cpp)
+    if (m == "ingame") {   // C++ (dctools/ps4ingame.cpp); a '<map>-multi-ingame12' row also places the level's wall-emblem spawners
+        const std::string &n = row.at("name");
+        std::vector<ExtraSpawner> extra;
+        if (n.size() > 9 && n.compare(n.size() - 9, 9, "-ingame12") == 0)
+            if (auto s = g_emblem_stage.find(n.substr(0, n.size() - 9)); s != g_emblem_stage.end())
+                extra = wallemblem::spawners(Pak(ps3_entry(s->second, idx), s->second.at("src") + ".pak"), s->first);
+        return ps4ingame_convert(ps3_source(row, idx), g_anim, extra);
+    }
     if (m != "stage") throw Stop("method " + m + " is not supported");
     // C++ (dctools/ps4stage.cpp); every row gets paramfix + cubefix ('mb' is still accepted). No converter option sets environment values any more.
     if (!opts.empty()) throw Stop("stage option " + opts.begin()->first + " is not supported");
@@ -331,8 +346,21 @@ Bytes build(const Row &row, const std::map<std::pair<std::string, std::string>, 
     json::Value ov;
     if (fs::exists(ovf)) ov = read_json(ovf);
     if (const json::Value *g = ov.get("gobo"); g && g->truthy()) o.gobo = g;
+    // 'templates': {PS3 material: retail template key} the owner approved for a material (kept by the planner)
+    if (const json::Value *t = ov.get("templates"))
+        for (const auto &[k, v] : t->fields) o.pins[k] = v.s;   // (ASCII names)
+    // a '<map>-multi' level leaves its emblem triangles to the wall-emblem actors (built here from the finished level
+    // when this row is the one the game loads)
+    o.emblem_walls = wallemblem::emblem_level(row.at("name"));
     const fs::path ps3 = ps3_source(row, idx);
-    return with_map_colors2(stage::stage_convert(ps3, o), row.at("name"), read_file(ps3));
+    const Bytes p3 = read_file(ps3);
+    Bytes lv = with_map_colors2(stage::stage_convert(ps3, o), row.at("name"), p3);
+    if (auto s = g_emblem_stage.find(row.at("name")); s != g_emblem_stage.end() && s->second.at("overlay") == row.at("overlay")) {
+        auto act = wallemblem::actors(Pak(p3, utf8(ps3)), row.at("name"), Pak(lv, row.at("name") + ".pak"), ps4main() / "actor33" / "ps4");
+        std::lock_guard<std::mutex> l(g_actor_mu);
+        g_actors[{row.at("overlay"), row.at("name")}] = std::move(act);
+    }
+    return lv;
 }
 
 std::set<std::pair<std::string, std::string>> shadowed() {
@@ -400,7 +428,10 @@ int levels(const std::vector<std::string> &argv) {
 
     std::vector<Row> rows;
     const std::regex only(a.get("--only", ""));
-    for (const Row &r : plan_rows())
+    const std::vector<Row> plan = plan_rows();
+    for (const Row &r : plan)   // later rows are higher overlays
+        if (r.at("method") == "stage" && wallemblem::emblem_level(r.at("name"))) g_emblem_stage[r.at("name")] = r;
+    for (const Row &r : plan)
         if (r.at("family") == family && (!a.val.count("--only") || std::regex_search(r.at("name"), only))) rows.push_back(r);
     if (rows.empty()) {
         std::printf("no plan rows for %s\n", family.c_str());
@@ -577,6 +608,16 @@ int levels(const std::vector<std::string> &argv) {
                 fs::create_directories(dst.parent_path());
                 write_file_replace(dst, data);
                 std::printf("installed %s/%s: %s\n", r.at("overlay").c_str(), r.at("name").c_str(), tag.c_str());
+                if (auto ac = g_actors.find({r.at("overlay"), r.at("name")}); ac != g_actors.end()) {   // its wall-emblem actors
+                    const fs::path ad = work / "overlay-r3" / "u3data" / "build" / "main" / "actor33" / "ps4";
+                    fs::create_directories(ad);
+                    int n = 0;
+                    for (const auto &[art, pak] : ac->second) {
+                        const fs::path f = ad / upath(art + ".pak");
+                        if (!fs::exists(f) || read_file(f) != pak) write_file_replace(f, pak), n++;
+                    }
+                    std::printf("  %zu wall-emblem actors (%d written)\n", ac->second.size(), n);
+                }
             } else {
                 std::printf("ok %s/%s: %s (dry run)\n", r.at("overlay").c_str(), r.at("name").c_str(), tag.c_str());
             }

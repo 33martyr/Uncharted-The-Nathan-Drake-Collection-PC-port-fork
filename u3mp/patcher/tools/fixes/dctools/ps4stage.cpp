@@ -1035,6 +1035,31 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
     std::map<std::string, double> soft_override;
     std::set<std::string> ov_uvscale2;   // materials whose PS3 overlay pair sits on a template overlay with a scaled UV 2
     fp::Ps3Programs progs(p);
+    // noodler waterfall sheets: the PS3 waterfall vertex program passes vertex colour blue on, and its fragment program
+    // multiplies the sheet colour by it (alpha comes from the texture colour and the depth fade); the material's
+    // Water_Brightness is the other factor of that product. Retail PS4 noodler sheets always carry blue >= 0.5 (1 on the
+    // blending ones). Sanctuary's foam sheets were authored with blue 0.03..0.14 and a brightness of 4.46: on PS4 they
+    // drew almost invisible (a thin line). Such a sheet (blue at most 0.5 over the material) gets its blue divided by the
+    // material's largest blue and its Water_Brightness multiplied by it: the PS3 colour product is kept, the blue reaches
+    // the range retail authors (sheets with a blue above 0.5 somewhere are untouched)
+    std::map<std::string, double> noodler_blue;
+    if (!g_u2)
+        for (const bg::Proto &c : C)
+            for (size_t k = 0; k < c.blocks.size(); k++) {
+                if (!c.mats[k]) continue;
+                const PlanMat *e = plan.get(*c.mats[k]);
+                if (!e || e->name.find("noodler-shaders/waterfall.material") == std::string::npos) continue;
+                const Block b = decode_block3(p, c.blocks[k], {}, false);
+                double mx = 0;
+                if (const Mat *col = last_attr(b, 0x15); col && col->cols >= 3)
+                    for (size_t i = 0; i < col->rows; i++) mx = std::max(mx, col->at(i, 2));
+                else
+                    mx = 1.0;
+                auto it = noodler_blue.find(*c.mats[k]);
+                noodler_blue[*c.mats[k]] = it == noodler_blue.end() ? mx : std::max(it->second, mx);
+            }
+    for (auto it = noodler_blue.begin(); it != noodler_blue.end();)
+        it = (it->second > 0.5 || it->second <= 0.0) ? noodler_blue.erase(it) : std::next(it);
     std::map<std::string, MatW> matrec;
     for (const std::string &n : names3) {
         const PlanMat *pe = plan.get(n);
@@ -1128,6 +1153,28 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 ov_layer[d] = set2 && ov_used < ovp.size() ? int(ov_used++) : -1;
                 if (set2 && feat("UV_2_APPLY_SCALE")) ov_uvscale2.insert(n);   // the set-2 scale: the PS3 value, else 1 (below)
             }
+            // the transparency of a PS3 glass program (g_fresnel* constants) without a '-trans' texture: the PS3 program adds
+            // a channel of its own colour-named texture to the fresnel alpha (Museum's tower / display-case glass: the green of
+            // the linear default-color-darkgray, 64 / 255), so that channel as a linear grey BC1 (the colour slot's copy is
+            // sRGB), not opaque white; none for other materials
+            auto glass_alpha = [&]() -> TexP {
+                if (!opt.fixes || own_get("trans") || !own_get("color") || !bg::param(pe->ps3params, "g_fresnelClampEnd")) return nullptr;
+                const std::string s3 = std::regex_replace(own_get("color")->back(), HT2, "");
+                const PakTexture *t3_ = ps3tex_get(s3);
+                // (only a flat default colour (art/.../default/default-color-*): a constant the program uses as the glass alpha.
+                // A real colour map stays opaque: the Shambhala / Facility ice grounds read through it as white floor patches)
+                if (!t3_ || !has(s3, "/default/default-color")) return nullptr;
+                std::string stem = s3.substr(s3.rfind('/') == std::string::npos ? 0 : s3.rfind('/') + 1);
+                if (ends_with(stem, ".tga")) stem = stem.substr(0, stem.size() - 4);
+                const std::string sg_ = "art/generated/u3mp/b104/" + stem + "-ytrans.tga";
+                const std::string pg_ = cook_prefix() + sg_ + "/" + u3::fmt("%016llX", (unsigned long long)sidu(sg_)) + ".ndb";
+                if (auto te = tex_entries.find(pg_.substr(0, pg_.size() - 4)); te != tex_entries.end()) return te->second;
+                const auto dv = fp::derive_texels(p, *t3_, "y", false, false);
+                if (!dv) return nullptr;
+                const auto &[tl_, w_, h_, mp_] = *dv;
+                const uint32_t hsh_ = sidu(after_prefix(pg_));
+                return add_texture_desc(pg_, desc_bytes(hsh_, 1, 0x47, 0x01000000, mp_, w_, h_, 3), tl_, gtex_bytes(hsh_, 0x400, 4));
+            };
             for (const MatBind &b : rec0.binds) {
                 auto role = param_role(b.param);
                 if (role == "spec") role = "mask";
@@ -1217,6 +1264,7 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                         if (const auto *t = own_get("trans")) e = texture_for_short((*t)[0]);
                         else if (const auto *mk = own_get("mask"); mk && ch != "A") e = texture_for_short((*mk)[0]);
                         else if (const auto *c = own_get("color"); c && ch == "A") e = texture_for_short((*c)[0]);
+                        if (!e && ch != "A") e = glass_alpha();
                         if (!e) e = flat_texture(std::string("trans"), b.param);
                     }
                 }
@@ -1238,6 +1286,7 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                     if (tr && tr != role && *tr != "lightmap" && *tr != "env" && own_get(*tr) && used_role[*tr] < own_get(*tr)->size())
                         e = texture_for_short((*own_get(*tr))[used_role[*tr]++]);
                 }
+                if (!e && b.param == "g_tNdFetchTransparencyMap") e = glass_alpha();
                 if (!e) e = flat_texture((opt.sky || opt.fixes) && detail_layer ? std::optional<std::string>("white") : role, b.param);
                 mw.binds.push_back({b.param, b.shrt, b.full, e});
             }
@@ -1335,6 +1384,9 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 mp.vals = nv;
             }
         }
+        if (auto nb = noodler_blue.find(n); nb != noodler_blue.end())   // its blue moved into the brightness
+            for (MatParam &mp : mw.rec.params)
+                if (mp.name == "Water_Brightness") set_first_float(mp.vals, double(as_float(rd32le(mp.vals, 0))) * nb->second);
         if (opt.fixes && !pe->exact && rec0.shader == "prime-shader.fx") {
             // a template's motion the PS3 material does not have stays still: its UV scroll speeds, oscillating UV
             // distortion and tilt velocities are 0 unless the PS3 material sets that constant itself
@@ -1368,10 +1420,99 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 for (MatParam &mp : mw.rec.params)
                     if (mp.name == "g_uvScale2") set_first_float(mp.vals, 1.0);
         }
+        if (opt.fixes && !pe->exact && rec0.shader == "prime-shader.fx") {
+            // the UV scales of a template follow its UV sets, the PS3 ones the UV slot the PS3 program samples a texture
+            // with (f[TEX0].xy: g_uvScale1, f[TEX0].zw: g_uvScale2; 1 when the material does not set it). A template UV
+            // set that scales its layers takes the PS3 scale of the PS3 textures bound to its layers, not the PS3 constant
+            // of the same number: Village's dirt colour, on the template's UV 2, took the PS3 g_uvScale2 of 0.03 meant for
+            // the large-scale dirt-noise map (f[TEX0].zw) and was drawn 33 times too large (a blurry floor)
+            static const std::regex HTU(R"(/[0-9A-F]{16}(\.ndb)?(\.error)?$)");
+            std::map<std::string, int> slot3;   // PS3 short -> 1 / 2 (one slot only), 0 unknown
+            for (const auto &[full, cs] : fp::texture_coords(progs, n)) {
+                const std::string s = std::regex_replace(short_of(full), HTU, "");
+                int k = 0;
+                if (cs.size() == 1 && *cs.begin() == "TEX0.xy") k = 1;
+                else if (cs.size() == 1 && *cs.begin() == "TEX0.zw") k = 2;
+                auto [it, fresh] = slot3.emplace(s, k);
+                if (!fresh && it->second != k) it->second = 0;
+            }
+            auto scale3 = [&](int k) {
+                const std::vector<double> *v = bg::param(pe->ps3params, "g_uvScale" + std::to_string(k));
+                if (!v && k == 1) v = bg::param(pe->ps3params, "g_uvScale");
+                return v && !v->empty() ? (*v)[0] : 1.0;
+            };
+            const auto &feats = rec0.feats;
+            auto has_feat = [&](const std::string &f) { return std::find(feats.begin(), feats.end(), f) != feats.end(); };
+            static const std::regex PSLOT(R"(^g_tNdFetch(Color|Normal|Mask|Detail|Overlay|OverlayControl)(\d)Map$)");
+            std::map<int, std::set<double>> vote_col, vote_any;   // template UV set -> PS3 scales of its bound textures
+            for (const auto &bd : mw.binds) {
+                if (!bd.e) continue;
+                const auto si = slot3.find(std::regex_replace(short_of(bd.e->full), HTU, ""));
+                if (si == slot3.end() || !si->second) continue;
+                std::string pre;
+                std::smatch pm;
+                if (bd.param == "g_tNdFetchBlendMap") pre = "BLEND_FACTOR_USE_UV";
+                else if (std::regex_match(bd.param, pm, PSLOT)) {
+                    const std::string k = pm[1].str(), d = pm[2].str();
+                    pre = k == "Color" ? "COLOR_" + d + "_COLOR_MAP_USE_UV" : k == "Normal" ? "NORMAL_" + d + "_NORMAL_MAP_USE_UV"
+                        : k == "Mask" ? "COLOR_" + d + "_MASK_USE_UV" : k == "Detail" ? "NORMAL_" + d + "_DETAIL_MAP_USE_UV"
+                        : k == "Overlay" ? "COLOR_" + d + "_OVERLAY_USE_UV" : "COLOR_" + d + "_OVERLAY_CONTROL_TEXTURE_USE_UV";
+                } else
+                    continue;
+                int uv = 1;
+                for (int d = 2; d <= 4; d++)
+                    if (has_feat(pre + std::to_string(d))) uv = d;
+                const double s = scale3(si->second);
+                vote_any[uv].insert(s);
+                if (starts_with(bd.param, "g_tNdFetchColor")) vote_col[uv].insert(s);
+            }
+            for (const auto &[uv, all] : vote_any) {
+                const std::set<double> &v = vote_col.count(uv) ? vote_col.at(uv) : all;
+                if (v.size() != 1 || !has_feat("UV_" + std::to_string(uv) + "_APPLY_SCALE")) continue;
+                const std::string pn = "g_uvScale" + std::to_string(uv);
+                for (MatParam &mp : mw.rec.params)
+                    if (mp.name == pn) set_first_float(mp.vals, *v.begin());
+            }
+        }
         matrec[n] = std::move(mw);
     }
 
     // ---------------- effects
+    // U3: the face culling of a pass is byte +0x1d of its 0xd0 pass record (1: back faces culled, 0: both faces drawn; the
+    // retail GLOBAL_2SIDED permutations differ from their one-sided twins in that byte only, e.g. general/shadowblocker vs
+    // shadowblocker-double). A non-exact PS3 material that draws both faces (pass state bit 0x01000000 clear) on a template
+    // whose effect culls gets that effect with the byte cleared, under its own hash (the template hash xor a constant), so the
+    // template's look stays and only the culling follows PS3 (Desert Village's thatch on its 0.10.111 twin
+    // des-vil-reeds2-2trans was invisible from below)
+    std::set<std::string> cull_off_hash;
+    auto culls = [](const MatRec &r) {
+        if (r.fx.empty() || r.fx[0].data.size() < 16) return false;
+        const FxItem &e = r.fx[0];
+        std::optional<int64_t> pp;
+        for (const auto &q : e.ptrs)
+            if (q.pos == 0 && q.target == 0) pp = q.off;
+        const uint32_t np = rd32le(e.data, 8);
+        if (!pp || np == 0 || np > 64) return false;
+        bool any = false;
+        for (uint32_t i = 0; i < np; i++) {
+            const uint64_t a = uint64_t(*pp) + 0xd0ull * i + 0x1d;
+            if (a >= e.data.size()) return false;
+            any = any || e.data[a] == 1;
+        }
+        return any;
+    };
+    if (!g_u2)
+        for (const std::string &n : names3) {
+            const PlanMat *pe = plan.get(n);
+            auto mi = m3.find(n);
+            if (!pe || pe->exact || mi == m3.end() || mi->second->two_sided != 1) continue;
+            MatRec &rec = matrec[n].rec;
+            if (rec.shader != "prime-shader.fx" || !culls(rec)) continue;
+            char hx[17];
+            std::snprintf(hx, sizeof hx, "%016llX", (unsigned long long)(std::stoull(rec.hash, nullptr, 16) ^ 0x5D0B1E5D0B1E5D0Bull));
+            rec.hash = hx;
+            cull_off_hash.insert(rec.hash);
+        }
     std::vector<std::string> order_hash;
     std::map<std::string, std::pair<std::string, const MatRec *>> eff_by_hash;
     for (const std::string &n : names3) {
@@ -1430,6 +1571,9 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 std::map<uint64_t, std::optional<int64_t>> ptrs;
                 for (const auto &pp : clos[k].ptrs) ptrs[pp.pos] = pp.target == 0 ? std::optional<int64_t>(pp.off) : std::nullopt;
                 data = remap(data, ptrs, mp);
+                if (cull_off_hash.count(h))   // both faces drawn (see cull_off_hash)
+                    if (auto pp = ptrs.find(0); pp != ptrs.end() && pp->second)
+                        for (uint32_t i = 0, np = rd32le(data, 8); i < np; i++) data.at(size_t(*pp->second) + 0xd0ull * i + 0x1d) = 0;
             }
             auto b = blob("fx");
             b->raw(data);
@@ -1567,6 +1711,11 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 tabs.push_back({bg::res(p, bd.first, bd.second + 8 * bi), bg::res(p, bd.first, bd.second + 8 * bi + 4)});
             }
             blocks.push_back(decode_block3(p, pr.blocks[bi], tabs, opt.sky || opt.fixes));
+            if (pr.mats[bi])   // a dim noodler waterfall sheet: blue normalised (see noodler_blue)
+                if (auto nb = noodler_blue.find(*pr.mats[bi]); nb != noodler_blue.end())
+                    for (auto &[aid, m] : blocks.back().attrs)
+                        if (aid == 0x15 && m.cols >= 3)
+                            for (size_t i = 0; i < m.rows; i++) m.at(i, 2) = std::min(1.0, m.at(i, 2) / nb->second);
         }
         bool skinned = njoints > 0;
         for (const Block &b : blocks) skinned = skinned && b.has_skin;
@@ -1614,14 +1763,23 @@ Bytes convert_once(const Pak &p, const std::string &stage, const Plan &plan, con
                 for (const Block *b : bl) nv += b->nv;
                 Bytes idx;
                 size_t base = 0, ni = 0;
-                for (const Block *b : bl) {
-                    for (const auto &tr : b->tris)
-                        for (uint32_t v : tr) {
+                const bool emblem = opt.emblem_walls && bg::emblem_material(g.mat);   // wall emblems: the emblem triangles go to the actors
+                for (size_t bk = 0; bk < bl.size(); bk++) {
+                    const Block *b = bl[bk];
+                    const std::vector<bool> drop = emblem ? bg::emblem_triangles(p, pr.blocks[rec.chunk[bk]]) : std::vector<bool>{};
+                    if (emblem && drop.size() != b->tris.size()) throw Stop("AssertionError: emblem triangles of " + g.mat);
+                    for (size_t ti = 0; ti < b->tris.size(); ti++) {
+                        const auto &tr = b->tris[ti];
+                        // an emblem triangle stays as a degenerate one (its first corner three times): same counts and
+                        // layout as without the emblem walls, nothing drawn
+                        const std::array<uint32_t, 3> t3 = emblem && drop[ti] ? std::array<uint32_t, 3>{tr[0], tr[0], tr[0]} : tr;
+                        for (uint32_t v : t3) {
                             const uint64_t x = uint64_t(v) + base;
                             if (x > 0xffff) throw Stop("OverflowError: index out of bounds for uint16");
                             put16(idx, uint32_t(x));
                             ni++;
                         }
+                    }
                     base += b->nv;
                 }
                 // main streams in PS3 attribute order (union over blocks; missing = default)
@@ -2614,7 +2772,7 @@ Bytes convert_two_pass(const fs::path &ps3, const std::string &lv, const Plan &p
 }  // namespace
 
 Bytes stage_convert(const fs::path &ps3, const Options &o) {
-    Plan plan = make_plan(ps3, o.res, o.fixes ? o.water_templates : fs::path(), o.exclude, o.fixes ? o.pak_dir : fs::path());   // fixes: water templates scored (batch98)
+    Plan plan = make_plan(ps3, o.res, o.fixes ? o.water_templates : fs::path(), o.exclude, o.fixes ? o.pak_dir : fs::path(), o.pins);   // fixes: water templates scored (batch98)
     const std::string lv = plan.stage;
     if (o.plan_summary) {
         size_t ne = 0;

@@ -1,6 +1,6 @@
 {
 "reference": "pak23_ps4.txt",
-"lines": 27449,
+"lines": 27540,
 "sources": [
 "ps3-p18",
 "retail",
@@ -138,7 +138,30 @@ true,
 "C",
 "ps3-p18",
 2069,
-16,
+12,
+true,
+0
+],
+[
+"L",
+[
+"actor cha-multi-emblem-0",
+"actor cha-multi-emblem-1",
+"actor cha-multi-emblem-2",
+"actor cha-multi-emblem-3",
+"actor cha-multi-emblem-4",
+"actor cha-multi-emblem-5",
+"actor cha-multi-emblem-6",
+"actor cha-multi-emblem-7",
+"actor cha-multi-emblem-8"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+2081,
+4,
 true,
 0
 ],
@@ -330,7 +353,28 @@ true,
 "C",
 "ps3-p18",
 5297,
-8,
+6,
+true,
+0
+],
+[
+"L",
+[
+"actor desert-multi-emblem-0",
+"actor desert-multi-emblem-1",
+"actor desert-multi-emblem-2",
+"actor desert-multi-emblem-3",
+"actor desert-multi-emblem-4",
+"actor desert-multi-emblem-5",
+"actor desert-multi-emblem-6"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+5303,
+2,
 true,
 0
 ],
@@ -370,7 +414,25 @@ true,
 "C",
 "ps3-p18",
 6285,
-6,
+4,
+true,
+0
+],
+[
+"L",
+[
+"actor facility-multi-emblem-0",
+"actor facility-multi-emblem-1",
+"actor facility-multi-emblem-2",
+"actor facility-multi-emblem-board-0"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+6289,
+2,
 true,
 0
 ],
@@ -434,7 +496,28 @@ true,
 "C",
 "ps3-p18",
 7793,
-10,
+9,
+true,
+0
+],
+[
+"L",
+[
+"actor highrise-multi-emblem-0",
+"actor highrise-multi-emblem-1",
+"actor highrise-multi-emblem-2",
+"actor highrise-multi-emblem-3",
+"actor highrise-multi-emblem-4",
+"actor highrise-multi-emblem-5",
+"actor highrise-multi-emblem-6"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+7802,
+1,
 true,
 0
 ],
@@ -474,7 +557,33 @@ true,
 "C",
 "ps3-p18",
 10127,
-17,
+16,
+true,
+0
+],
+[
+"L",
+[
+"actor museum-multi-emblem-0",
+"actor museum-multi-emblem-1",
+"actor museum-multi-emblem-2",
+"actor museum-multi-emblem-3",
+"actor museum-multi-emblem-4",
+"actor museum-multi-emblem-5",
+"actor museum-multi-emblem-6",
+"actor museum-multi-emblem-7",
+"actor museum-multi-emblem-8",
+"actor museum-multi-emblem-9",
+"actor museum-multi-emblem-10",
+"actor museum-multi-emblem-11"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+10143,
+1,
 true,
 0
 ],
@@ -546,7 +655,25 @@ true,
 "C",
 "ps3-p18",
 10281,
-6,
+4,
+true,
+0
+],
+[
+"L",
+[
+"actor ruins-multi-emblem-0",
+"actor ruins-multi-emblem-1",
+"actor ruins-multi-emblem-2",
+"actor ruins-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+10285,
+2,
 true,
 0
 ],
@@ -866,7 +993,29 @@ true,
 "C",
 "ps3-p18",
 19594,
-7,
+6,
+true,
+0
+],
+[
+"L",
+[
+"actor warzone-multi-emblem-0",
+"actor warzone-multi-emblem-1",
+"actor warzone-multi-emblem-2",
+"actor warzone-multi-emblem-3",
+"actor warzone-multi-emblem-4",
+"actor warzone-multi-emblem-5",
+"actor warzone-multi-emblem-6",
+"actor warzone-multi-emblem-7"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+19600,
+1,
 true,
 0
 ],
@@ -978,7 +1127,23 @@ true,
 "C",
 "ps3-p18",
 18145,
-12,
+10,
+true,
+0
+],
+[
+"L",
+[
+"actor ldn-streets-multi-emblem-0",
+"actor ldn-streets-multi-emblem-1"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+18155,
+2,
 true,
 0
 ],
@@ -2498,7 +2663,25 @@ true,
 "C",
 "ps3-p18",
 16463,
-6,
+4,
+true,
+0
+],
+[
+"L",
+[
+"actor cave-multi-emblem-0",
+"actor cave-multi-emblem-1",
+"actor cave-multi-emblem-2",
+"actor cave-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+16467,
+2,
 true,
 0
 ],
@@ -2906,7 +3089,25 @@ true,
 "C",
 "ps3-p18",
 16907,
-9,
+2,
+true,
+0
+],
+[
+"L",
+[
+"actor fort-multi-emblem-0",
+"actor fort-multi-emblem-1",
+"actor fort-multi-emblem-2",
+"actor fort-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+16909,
+7,
 true,
 0
 ],
@@ -3114,7 +3315,29 @@ true,
 "C",
 "ps3-p18",
 17108,
-11,
+7,
+true,
+0
+],
+[
+"L",
+[
+"actor gompa-multi-emblem-0",
+"actor gompa-multi-emblem-1",
+"actor gompa-multi-emblem-2",
+"actor gompa-multi-emblem-3",
+"actor gompa-multi-emblem-4",
+"actor gompa-multi-emblem-5",
+"actor gompa-multi-emblem-6",
+"actor gompa-multi-emblem-7"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+17115,
+4,
 true,
 0
 ],
@@ -3370,7 +3593,27 @@ true,
 "C",
 "ps3-p18",
 17222,
-61,
+58,
+true,
+0
+],
+[
+"L",
+[
+"actor grave-multi-emblem-0",
+"actor grave-multi-emblem-1",
+"actor grave-multi-emblem-2",
+"actor grave-multi-emblem-3",
+"actor grave-multi-emblem-4",
+"actor grave-multi-emblem-5"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+17280,
+3,
 true,
 0
 ],
@@ -3826,7 +4069,25 @@ true,
 "C",
 "ps3-p18",
 9147,
-11,
+4,
+true,
+1
+],
+[
+"L",
+[
+"actor ldn-train-multi-emblem-0",
+"actor ldn-train-multi-emblem-1",
+"actor ldn-train-multi-emblem-2",
+"actor ldn-train-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+9151,
+7,
 true,
 1
 ],
@@ -4266,7 +4527,25 @@ true,
 "C",
 "ps3-p18",
 18433,
-6,
+4,
+true,
+0
+],
+[
+"L",
+[
+"actor oasis-multi-emblem-0",
+"actor oasis-multi-emblem-1",
+"actor oasis-multi-emblem-2",
+"actor oasis-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+18437,
+2,
 true,
 0
 ],
@@ -4474,7 +4753,25 @@ true,
 "C",
 "ps3-p18",
 18460,
-18,
+17,
+true,
+0
+],
+[
+"L",
+[
+"actor old-quarter-multi-emblem-0",
+"actor old-quarter-multi-emblem-1",
+"actor old-quarter-multi-emblem-2",
+"actor old-quarter-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+18477,
+1,
 true,
 0
 ],
@@ -4674,7 +4971,25 @@ true,
 "C",
 "ps3-p18",
 18692,
-8,
+4,
+true,
+0
+],
+[
+"L",
+[
+"actor shambhala-multi-emblem-0",
+"actor shambhala-multi-emblem-1",
+"actor shambhala-multi-emblem-2",
+"actor shambhala-multi-emblem-3"
+],
+true
+],
+[
+"C",
+"ps3-p18",
+18696,
+4,
 true,
 0
 ],

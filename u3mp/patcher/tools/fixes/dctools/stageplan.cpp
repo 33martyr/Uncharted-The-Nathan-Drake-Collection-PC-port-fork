@@ -36,6 +36,15 @@ std::string lower(std::string s) {
         if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
     return s;
 }
+// a material named as a shadow caster (shadow blocker, canopy shadow card): retail draws such a material black or into the
+// shadow maps only (COLOR_1_BLACK / GLOBAL_SHADOW_PROXY, or a colourless tinted canopy card), so a shadow template is only
+// for a PS3 shadow caster, and a PS3 shadow caster only takes a shadow template. A leaf canopy planned on the retail
+// cha-beech-leaves-canopy-shadow card (no colour map, white tint) drew the Borneo co-op trees white; the Sanctuary void
+// planes (cave-shadowblocker, black colour + lightmap) were planned on a lit floor
+bool shadow_only_name(const std::string &s) {
+    const std::string l = lower(s);
+    return has(l, "shadowblocker") || has(l, "shadow-blocker") || has(l, "canopy-shadow");
+}
 
 std::vector<std::string> split(const std::string &s, char c) {
     std::vector<std::string> v;
@@ -294,6 +303,10 @@ struct SMat {
     // overlay mask is scaled by the vertex colour (COLOR_d_VERTEX_OVERLAY_MASK); soft: BLEND_FACTOR_SOFTNESS
     int ovl = 0;
     bool ovset2 = false, ovvmask = false, soft = false;
+    bool two = false;     // GLOBAL_2SIDED: the template draws both faces
+    bool proxy = false;   // GLOBAL_SHADOW_PROXY: the template draws into the shadow maps only
+    bool sun = false;     // DIFFUSE_LIGHT_ADD_SUNLIGHT: the template is lit by the sun
+    unsigned uvs = 0;     // bit d: UV_d_APPLY_SCALE (the template scales layer d's UVs by g_uvScale<d>)
 };
 struct SEnt {
     std::string pak;
@@ -367,6 +380,8 @@ struct FeatSet {
     unsigned layers = 0;
     bool blend12 = false, normalmap = false, anydist = false, anyinc = false, blendfactor = false, uv2 = false, uv34 = false, vcol = false;
     bool border = false;
+    bool specular = false, envspec = false;   // FINAL_COLOR_ADD_SPECULAR_LIGHT / SPECULAR_LIGHT_ADD_ENVIRONMENT
+    bool tmap = false, talpha = false;   // the alpha from a transparency map (its own slot or shared texture 1); talpha: from the A channel of shared texture 1
 };
 struct Survey {
     std::vector<SKey> keys;
@@ -420,6 +435,8 @@ FeatSet feat_set(const std::vector<std::string> &uniq) {
         fs.dist.push_back(has(x, "DISTORTION"));
         fs.incand.push_back(has(x, "INCANDESCENCE"));
         fs.addenv.push_back(has(x, "ADD_ENVIRONMENT"));
+        fs.specular = fs.specular || x == "FINAL_COLOR_ADD_SPECULAR_LIGHT";
+        fs.envspec = fs.envspec || x == "SPECULAR_LIGHT_ADD_ENVIRONMENT";
         int d;
         if (layer_of(x, d)) fs.layers |= 1u << d;
         fs.blend12 = fs.blend12 || starts_with(x, "COLOR_1_BLEND_COLOR_2");
@@ -427,10 +444,18 @@ FeatSet feat_set(const std::vector<std::string> &uniq) {
         fs.anydist = fs.anydist || has(x, "DISTORTION");
         fs.anyinc = fs.anyinc || has(x, "INCANDESCENCE");
         fs.blendfactor = fs.blendfactor || starts_with(x, "BLEND_FACTOR");
-        fs.uv2 = fs.uv2 || has(x, "USE_UV2") || has(x, "USE_SET_2") || has(x, "OFFSET_MAPPING_USE_UV2");
-        fs.uv34 = fs.uv34 || has(x, "USE_UV3") || has(x, "USE_UV4");
+        // the vertex UV sets the template reads (PS4 counts them from 0): a layer's USE_UV<n> picks UV channel n, which is
+        // vertex set 0 unless UV_<n>_USE_SET_<s> says otherwise. Set 1 needs the PS3 second UV set (attribute 0x12); set
+        // 2 the stage never writes. (Retail twins agree: 492 of the single-set PS3 materials' twins read channel 2 or 4,
+        // e.g. a layer 2 tiled by UV_2_APPLY_SCALE with COLOR_2_COLOR_MAP_USE_UV2, from set 0; 111 of 112 twins reading set
+        // 1 have the PS3 second set.) Reading USE_UV2 / UV3 / UV4 as 'second / third set' kept every layer-tiling
+        // template off the single-set PS3 materials.
+        fs.uv2 = fs.uv2 || has(x, "_USE_SET_1");
+        fs.uv34 = fs.uv34 || has(x, "_USE_SET_2");
         fs.vcol = fs.vcol || has(x, "VERTEX_COLOR") || has(x, "VERTEX_AMBIENT") || has(x, "VERTEX_OVERLAY") || has(x, "VERTEX_MASK") || has(x, "_VERTEX_");
         fs.border = fs.border || has(x, "BORDER_TINT");
+        fs.tmap = fs.tmap || x == "TRANSPARENCY_USE_TRANSPARENCY_MAP" || starts_with(x, "TRANSPARENCY_MAP_USE_SHARED_TEXTURE_1_");
+        fs.talpha = fs.talpha || x == "TRANSPARENCY_MAP_USE_SHARED_TEXTURE_1_A";
     }
     return fs;
 }
@@ -481,6 +506,19 @@ std::shared_ptr<Survey> load_survey(const fs::path &res) {
             if (fset.count("TRANSPARENCY_ALPHA_BLEND")) sm->c4 |= C_BLEND;
             if (fset.count("GLOBAL_LEAF")) sm->c4 |= C_LEAF;
             sm->leaf = fset.count("GLOBAL_LEAF") != 0;
+            sm->two = fset.count("GLOBAL_2SIDED") != 0;
+            sm->proxy = fset.count("GLOBAL_SHADOW_PROXY") != 0;
+            sm->sun = fset.count("DIFFUSE_LIGHT_ADD_SUNLIGHT") != 0;
+            // (layer 1 reads UV channel 1; layer d > 1 reads channel d only with COLOR_d_COLOR_MAP_USE_UVd, as retail's
+            // twins of PS3 layers with their own g_uvScale<d> do)
+            for (int d = 1; d <= 4; d++) {
+                const std::string ds = std::to_string(d);
+                // (the converter writes the PS3 g_uvScale<d> into the template's g_uvScale<d>: it scales layer d only when layer
+                // d reads channel d; Fort's cream plaster (g_uvScale1 2) landed on a layer 1 read through channel 3)
+                bool other = false;
+                for (int e = 2; e <= 4; e++) other = other || (e != d && fset.count("COLOR_" + ds + "_COLOR_MAP_USE_UV" + std::to_string(e)));
+                if (fset.count("UV_" + ds + "_APPLY_SCALE") && !other && (d == 1 || fset.count("COLOR_" + ds + "_COLOR_MAP_USE_UV" + ds))) sm->uvs |= 1u << d;
+            }
             sm->tmus1a = fset.count("TRANSPARENCY_MAP_USE_SHARED_TEXTURE_1_A") != 0;
             for (const std::string &x : fset)
                 for (const char *w : {"GLOBAL_PIVOT_WIND", "BP_TREE_ANIM", "ND_TREE_ANIM"}) sm->wind = sm->wind || has(x, w);
@@ -518,7 +556,7 @@ std::shared_ptr<Survey> load_survey(const fs::path &res) {
                 sk.kdir = split(k, ':')[0];
                 sk.kc = split(sk.kdir, '/');
                 sk.kind = surface_kind(k);
-                sk.shadowblocker = has(k, "shadowblocker");
+                sk.shadowblocker = shadow_only_name(k);
                 S->keys.push_back(std::move(sk));
             }
             S->keys[ki->second].ents.push_back({pak, size, sm.get()});
@@ -567,6 +605,38 @@ std::set<uint32_t> ps3_alpha_textures(const Pak &p) {   // PS3 DXT1 textures wit
         if (n && double(hit) / double(n) > 0.05) out.insert(t.hash);
     }
     return out;
+}
+
+// the mean |normal y| of a PS3 material's background vertices (attribute 2), -1 without normals: a waterfall sheet stands
+// (well under 0.5), a river, pool or ocean surface lies (near 1)
+double ps3_material_upness(const Pak &p, const std::vector<bg::Proto> &C, const std::string &mat) {
+    double sum = 0;
+    size_t n = 0;
+    for (const bg::Proto &c : C)
+        for (size_t k = 0; k < c.blocks.size(); k++) {
+            if (!c.mats[k] || *c.mats[k] != mat) continue;
+            try {
+                const auto [pg, bo] = c.blocks[k];
+                const Ref cnt = bg::need(p, pg, bo + 0x24), f = bg::need(p, pg, bo + 0x28), s = bg::need(p, pg, bo);
+                const uint32_t nv = p.pu32(cnt.first, cnt.second);
+                const std::vector<bg::Attr> attrs = bg::read_format(p, f.first, f.second);
+                const std::map<int, int> prec = bg::block_prec(attrs);
+                for (size_t ai = 0; ai < attrs.size(); ai++) {
+                    if (attrs[ai].id != 2 || attrs[ai].n() < 2) continue;
+                    const ORef r = bg::res(p, s.first, s.second + 8 * ai);
+                    if (!r) continue;
+                    auto pi = prec.find(2);
+                    const Mat v = bg::decode_attr(p, f.first, f.second, attrs[ai], r->first, r->second, nv, pi == prec.end() ? -1 : pi->second);
+                    for (size_t i = 0; i < v.rows; i++) {
+                        sum += std::fabs(v.at(i, 1));
+                        n++;
+                    }
+                    break;
+                }
+            } catch (const std::exception &) {
+            }
+        }
+    return n ? sum / double(n) : -1.0;
 }
 
 std::map<std::string, std::set<int>> ps3_material_attrs(const Pak &p) {
@@ -621,6 +691,11 @@ struct M3 {
     size_t ns3 = 0;                    // PS3 constants minus the generic ones
     bool ov = false;                   // the PS3 material has an overlay layer (overlay_pairs)
     bool soft3 = false;                // the PS3 material sets g_blendSoftness_blendOffset_linearBlendOffset
+    bool spec3 = false, env3 = false;  // the PS3 program adds specular light (g_specularBrightness > 0); and an env map
+                                       // reflection (an env texture and g_specularEnvironmentStrength > 0)
+    bool fres3 = false;                // the PS3 material sets g_fresnel* constants (the PS3 glass programs)
+    int two_sided = -1;                // the PS3 pass state draws both faces (1), culls (0), unknown (-1)
+    unsigned uvfar = 0;                // bit d: g_uvScale<d> at least 1.5x away from 1 (a tiling only a UV_d scale carries)
     std::unordered_map<size_t, int> cache;   // feature set id -> v2 + v2.3 score
 };
 
@@ -642,6 +717,13 @@ int v2_v23(const M3 &m, const FeatSet &f) {
     }
     if (m.dis3 && !f.anydist) pen -= 15;
     if (m.inc3 && !f.anyinc) pen -= 15;
+    // the PS3 program's specular term: a PS3 material that sets g_specularBrightness above 0 draws specular light (sun,
+    // ambient spec, and with g_specularEnvironmentStrength above 0 and an env texture the env map reflection). A template
+    // without FINAL_COLOR_ADD_SPECULAR_LIGHT drops it and with it the PS3 constants that set it: Museum lost it on 117 of
+    // 211 materials (copper roofs drawn as their orange base instead of the teal-reflecting metal, brass lanterns dark,
+    // marble without its sheen).
+    if (m.spec3 && !f.specular) pen -= 30;
+    if (m.spec3 && m.env3 && (m.r3 & R_ENV) && !f.envspec) pen -= 10;
     unsigned allowed = blend3 ? 6u : 2u;   // {1, 2} / {1}
     if (m.ov)   // a PS3 overlay layer: the template's overlay layers and features are needed, not foreign
         for (const std::string &x : f.feats) {
@@ -651,6 +733,12 @@ int v2_v23(const M3 &m, const FeatSet &f) {
     pen -= 10 * popc(f.layers & ~allowed);
     if (blend3 && !(f.layers & 4)) pen -= 10;
     if (!blend3 && f.blendfactor) pen -= 10;
+    // a blending PS3 glass program (g_fresnel* constants: alpha = a transparency texture channel plus the fresnel term) on
+    // a template that takes its alpha from the colour map alpha draws opaque where that is solid (Museum's dark-grey
+    // display-case glass drew as a flat grey wall): a template with a transparency map slot, which gets the PS3 channel.
+    // Retail's glass-fresnel program (FINAL_COLOR_GLASS_FRESNEL) stays foreign: on these PS3 constants it drew the Museum
+    // cases solid black in the owner's test (2026-11-16)
+    if (m.fres3 && (m.c3 & C_BLEND) && (!f.tmap || f.talpha)) pen -= 30;
     for (size_t i = 0; i < f.feats.size(); i++) {
         if (f.bad[i]) {
             bool skip = (m.dis3 && f.dist[i]) || (m.ov && has(f.feats[i], "OVERLAY"));
@@ -658,7 +746,9 @@ int v2_v23(const M3 &m, const FeatSet &f) {
             if (!skip) pen -= f.bad[i];
         }
         if (f.incand[i] && !m.emissive) pen -= 15;
-        if (f.addenv[i] && !(m.r3 & R_ENV)) pen -= 4;
+        // (U3: retail adds an environment reflection exactly where the PS3 material has an env map: 4429 of 4454
+        // exact twins without one have none. A wet-metal template on Fort's cream plaster drew blue-white mirror slabs)
+        if (f.addenv[i] && !(m.r3 & R_ENV)) pen -= g_u2 ? 4 : 20;
     }
     if (!m.attrs3.empty()) {
         if (f.uv2 && !m.attrs3.count(0x12)) pen -= 40;
@@ -803,9 +893,12 @@ const PlanMat *Plan::get(const std::string &n) const {
     return nullptr;
 }
 
-Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &water_templates, const std::vector<std::string> &also_exclude, const fs::path &pak_dir) {
+Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &water_templates, const std::vector<std::string> &also_exclude, const fs::path &pak_dir,
+               const std::map<std::string, std::string> &pins) {
     std::optional<json::Value> wtpl;
-    static const std::regex FOLIAGE("plant|leaf|leaves|vine|card(?!board)|grass|moss|brom|bush|fern|ivy|palm-frond|frond|shrub|weed|reed|"
+    // (no "reed": retail draws its reed mats, thatch and reed plants with non-leaf templates; a GLOBAL_LEAF template
+    // sways, and Desert Village's still PS3 thatch moved on one)
+    static const std::regex FOLIAGE("plant|leaf|leaves|vine|card(?!board)|grass|moss|brom|bush|fern|ivy|palm-frond|frond|shrub|weed|"
                                     "flower|hedge|branch|twig|canopy|willow|banyan");
     static const std::regex GROUNDISH("floor|tile|ground|terrain|road|path|stone|rock|brick|wall|concrete|dirt|sand|mud|plaster|"
                                       "pavement|cobble|street|roof|step|stair|trim|wood-plank|planks|metal|marble|tarmac|gravel");
@@ -827,6 +920,11 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
         for (const bg::Group &g : c.groups) add_name(g.mat);
     const std::vector<std::string> wm = bg::water_materials(p);
     const std::set<std::string> water(wm.begin(), wm.end());
+    // the kind of each PS3 water surface (object word 5: 4 / 5 mesh surfaces, 7 / 8 grid surfaces, 9 displacement), per
+    // material; PS4 keeps it, and the retail water renderer draws a water.fx material only on objects of one kind
+    std::map<std::string, uint32_t> wkind;
+    for (const auto &[o, m] : bg::water_objects(p))
+        if (m && !m->empty() && !wkind.count(*m)) wkind[*m] = p.pu32(o.first, o.second + 20);
     for (const std::string &n : wm) add_name(n);
     std::vector<bg::Material3> mats3;
     std::vector<bg::Texture3> texs3;
@@ -948,7 +1046,8 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                     std::vector<std::string> p3names;
                     for (const auto &[k, v] : p3_of(n)) p3names.push_back(k);
                     const std::string *bestk = nullptr;
-                    std::tuple<int, int, int, int64_t, std::string> bestkey;
+                    std::tuple<bool, int, int, int, int64_t, std::string> bestkey;
+                    const auto wk = wkind.find(n);
                     std::set<std::string> tb(tx3.begin(), tx3.end());
                     for (const auto &[k, c] : cands) {
                         const json::Value &t = *wtpl->get(bg::utf8_of(k));
@@ -971,7 +1070,12 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                         int common = 0;
                         for (size_t i = 0; i < std::min(nc.size(), kc.size()) && nc[i] == kc[i]; i++) common++;
                         auto pi = psz.find(c->pak);
-                        const auto key = std::make_tuple(s, tov, common, -int64_t(pi == psz.end() ? 0 : pi->second), k);
+                        // first a template that retail draws on a water surface of the PS3 surface's kind: a grid
+                        // program (cruise-ship-ocean-end, ship-water-plane: kind 7) on a mesh surface (kind 5) drew Fort's
+                        // and Museum's open sea wrong
+                        const json::Value *tk = t.get("kind");
+                        const bool same_kind = wk == wkind.end() || !tk || tk->i == int64_t(wk->second);
+                        const auto key = std::make_tuple(same_kind, s, tov, common, -int64_t(pi == psz.end() ? 0 : pi->second), k);
                         if (!bestk || key > bestkey) {
                             bestk = &k;
                             bestkey = key;
@@ -1011,11 +1115,19 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
             const std::set<std::string> t3 = twin_textures3(n);
             const SEnt *tw = nullptr;
             const SKey *twk = nullptr;
+            // (U3: a twin that culls otherwise than the PS3 pass state is no twin: Desert Village's two-sided thatch
+            // des-reeds-messy2alpha-001 twins the one-sided retail des-vil-reeds2-2trans and vanished from below)
+            int two3 = -1;
+            if (auto mi3 = m3.find(n); mi3 != m3.end() && !g_u2) two3 = mi3->second->two_sided;
+            // (a pinned material keeps its pinned key as twin whatever it culls: stage_convert writes the PS3 cull state)
+            const auto pin = pins.find(n);
             if (t3.size() >= 2)
                 for (const SKey &k : S->keys) {
-                    if (k.shadowblocker && !has(n, "shadowblocker")) continue;
+                    if (k.shadowblocker && !shadow_only_name(n)) continue;
+                    if (pin != pins.end() && k.k != pin->second) continue;
                     for (const SEnt &c : k.ents) {
                         if (exclude.count(c.pak) || !c.m->prime) continue;
+                        if (pin == pins.end() && two3 >= 0 && (two3 == 1) != c.m->two) continue;
                         std::set<std::string> t4;
                         for (const auto &bd : c.m->b)
                             if (!twin_param_ignored(bd.first) && !twin_tex_ignored(bd.second)) t4.insert(bd.second);
@@ -1038,7 +1150,24 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                 continue;
             }
         }
-        if (!g_u2 && !pak_dir.empty() && !water.count(n) && other_family(p3_of(n))) {
+        // U3: a PS3 water program (bump + refraction / flow constants) on a standing sheet of background geometry is a
+        // waterfall: retail draws its waterfalls with the prime-shader ND_WATERFALL templates (cha-waterfalls-standard,
+        // san-cistern / san-courtyard water-fall-01), never with h2o.fx / water.fx, whose programs draw a lying water surface
+        // (on the Sanctuary stone-head waterfall the h2o.fx ocean template left a thin dark line). Such a material skips the
+        // other-family rule and takes the flowing-water prime pass below
+        bool standing_water = false;
+        if (!g_u2 && !water.count(n)) {
+            bool bump = false, flow = false;
+            for (const auto &[k, v] : p3_of(n)) {
+                bump = bump || k == "g_fBumpScale";
+                flow = flow || starts_with(k, "g_fRefraction") || starts_with(k, "g_fFlowTime") || starts_with(k, "g_fTimeScroll");
+            }
+            if (bump && flow) {
+                const double up = ps3_material_upness(p, C, n);
+                standing_water = up >= 0 && up < 0.5;
+            }
+        }
+        if (!g_u2 && !pak_dir.empty() && !water.count(n) && !standing_water && !pins.count(n) && other_family(p3_of(n))) {
             // a PS3 material of another shader family (water / h2o meshes, waterfall sheets, noodler waterfall foam): the
             // retail material of a non-prime shader whose constants (packed names split) cover it best, the textures it
             // shares with the PS3 material breaking ties. Its own program keeps the PS3 look and motion; a prime-shader
@@ -1163,6 +1292,7 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
             m.c3 |= C_BLEND;
         else if (col_alpha)
             m.c3 |= C_CUT;
+        if (mi != m3.end() && !g_u2) m.two_sided = mi->second->two_sided;
         m.fdir = n.substr(0, n.rfind('/'));
         {
             const auto v = split(n, '/');
@@ -1201,14 +1331,24 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                 else if (k == "g_diffuseColorBorderTint")
                     m.strong.push_back(k);
                 if (k != "g_specularBrightness" && k != "g_specularExponentMax") m.ns3++;
+                if (k == "g_specularBrightness" && !v.empty() && v[0] > 1e-4) m.spec3 = true;
+                if (k == "g_specularEnvironmentStrength" && !v.empty() && v[0] > 1e-4) m.env3 = true;
             }
             m.inc3 = has(ks, "incand");
+            m.fres3 = has(ks, "g_fresnel");
             m.dis3 = has(ks, "distort");
             static const std::regex EMISSIVE("lamp|light|fire|glow|neon|screen|incand|emissive|sky");
             m.emissive = m.inc3 || rx(m.low, EMISSIVE);
             m.nrm3 = (m.r3 & R_NORMAL) != 0;
             // (a moving material keeps its scroll first: a second colour layer is not asked of the scrolling templates)
             if (two_cols && m.scr3.empty()) m.two3 = true;
+            if (!g_u2)   // U3: the far tilings of the layers the PS3 material draws (layer 1; layer 2 of a two-layer one)
+                for (const auto &[k, v] : p3) {
+                    int d;
+                    if (!uvp(k, d) || v.empty() || d < 1 || d > 4 || (d >= 2 && !m.two3)) continue;
+                    const double a = std::fabs(v[0]);
+                    if (a >= 1.5 || a <= 1.0 / 1.5) m.uvfar |= 1u << d;
+                }
         }
         struct Best {
             int64_t score2, negsz;
@@ -1227,6 +1367,10 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                 flow = flow || starts_with(k, "g_fRefraction") || starts_with(k, "g_fFlowTime") || starts_with(k, "g_fTimeScroll");
             }
             waterprog = bump && flow;
+            // U3: a PS3 water program refracts the scene behind it through its bump map: a refracting waterfall template
+            // (TRANSPARENCY_DISTORTION) keeps it clear; a '-no-refract' one drew Borneo co-op's clear falling-water sheet
+            // as an opaque dark sheet across the gorge
+            if (waterprog && !g_u2) m.dis3 = true;
         }
         const std::string mkind = surface_kind(n);
         // U3: a moving PS3 water surface (a material of the water kind or a caustics sheet with scroll / flow constants) is
@@ -1242,7 +1386,10 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
         const bool scroll_first = !g_u2 && !m.scr3.empty() && (mkind == "water" || has(m.low, "caustic"));
         for (int pass = waterprog ? 0 : scroll_first ? 1 : 2; pass < 3 && !best; pass++)
         for (const SKey &k : S->keys) {
-            if (k.shadowblocker && !has(n, "shadowblocker")) continue;
+            if (auto pin = pins.find(n); pin != pins.end() && k.k != pin->second) continue;   // a pinned material: its pinned key only
+            if (!g_u2 && k.shadowblocker != shadow_only_name(n)) continue;   // U3: shadow casters on shadow templates only
+            if (g_u2 && k.shadowblocker && !has(n, "shadowblocker")) continue;
+            if (!g_u2 && has(k.k, "ik-only") != has(n, "ik-only")) continue;   // IK-only blockers stay their own kind
             int common = 0;
             for (size_t i = 0; i < std::min(m.ncomp.size(), k.kc.size()) && m.ncomp[i] == k.kc[i]; i++) common++;
             int dirsc = 0;
@@ -1275,6 +1422,21 @@ Plan make_plan(const fs::path &ps3path, const fs::path &res, const fs::path &wat
                 score += dirsc;
                 if (((m.r3 & R_TRANS) != 0) != ((sm.r4 & R_TRANS) != 0)) score -= 5;
                 score -= 3 * int(m.ns3);   // no feature rule file: the template's predicted params are empty
+                if (!g_u2) {
+                    // U3: the PS3 pass state's face culling: a two-sided PS3 surface (reed mats, foliage, cloth) on a
+                    // one-sided template vanishes from behind (Desert Village's reed roof seen from below), a one-sided one
+                    // on a two-sided template shows its back faces
+                    if (m.two_sided >= 0 && (m.two_sided == 1) != sm.two) score -= 25;
+                    // a PS3 colour texture on a template without a colour map draws as the flat template tint (white)
+                    if ((m.r3 & R_COLOR) && !(sm.r4 & R_COLOR)) score -= 40;
+                    // a PS3 layer tiled far from 1x (g_uvScale<d> 0.5 / 3 / 8 / 10 ...) on a template that cannot scale
+                    // that layer stretches it (Sanctuary's moss layer at 1/10 of its tiling: a blurry green pillar)
+                    score -= 30 * popc(m.uvfar & ~sm.uvs);
+                    // a PS3 shadow blocker draws (black) where the PS3 instance shows it; the instance flags hide the rest
+                    if (sm.proxy) score -= 20;
+                    // a lit PS3 surface on a template the sun does not light (interior templates) darkens outdoors
+                    if (!sm.sun && !m.emissive) score -= 12;
+                }
                 if (sm.wind) score -= 40;
                 if (sm.leaf && !(m.c3 & C_LEAF)) score -= 30;
                 // a PS3 overlay layer (colour + its mask, opaque, read with UV set 2): a template with an overlay colour +

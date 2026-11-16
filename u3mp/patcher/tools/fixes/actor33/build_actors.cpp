@@ -220,7 +220,10 @@ Bytes build(const Job &r) {
         kw.match_streams = kwj.get("match_streams") != nullptr;
         kw.graft = kwj.get("graft") != nullptr;
         kw.own_skel = kwj.get("own_skel") != nullptr;
-        kw.max_tex = std::stoi(r.at("cap"));
+        // a PS3 prop on its own skeleton (vehicles, tanks, buildings, luggage) keeps every PS3 mip: it has no PS4 texture
+        // stream to bring the top mips back, and the cap drew the Warzone Fiat body (1024 on PS3) at 64x64. A prop map
+        // grows a level by at most 3.3 MB (Village, Fort)
+        kw.max_tex = kw.own_skel ? 0 : std::stoi(r.at("cap"));
         const std::string &es = r.at("env");
         if (es != "" && es != "-" && es != "{}") {
             json::Value e;

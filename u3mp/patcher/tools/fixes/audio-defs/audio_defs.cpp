@@ -268,7 +268,9 @@ int audio_defs(const std::vector<std::string> &argv) {
         std::printf("already applied: audio.bin %zu bytes, modules.bin audio size %llu\n", out.size(), (unsigned long long)old);
         return 0;
     }
-    if (old != cur && old != out.size())
+    // (a modules.bin an earlier step rebuilt on an update carries the retail size while the overlay's audio.bin is
+    // already the completed one: the word is set again)
+    if (old != cur && old != out.size() && old != fs::file_size(retail))
         throw Stop(fmt("modules.bin: audio size word %llu is neither the current audio.bin size %llu nor the new %zu", (unsigned long long)old,
                        (unsigned long long)cur, out.size()));
     wr64le(&mod[slot], out.size());

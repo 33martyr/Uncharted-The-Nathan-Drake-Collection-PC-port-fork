@@ -764,3 +764,51 @@ int uv_set2_reads(Ps3Programs &P, const std::string &name) {
 }
 
 }  // namespace u3::fp
+
+namespace u3::fp {
+
+// the texture coordinates the main-pass program samples each texture with: full texture name -> {"TEX0.xy", "TEX0.zw",
+// "TEX6.xy", ... or "reg" for a coordinate computed in the program}. The sampler units are matched to the references as
+// unit_map does (the references after the three lighting buffers take the used units below 12, unit 0 last)
+std::map<std::string, std::set<std::string>> texture_coords(Ps3Programs &P, const std::string &name) {
+    std::map<std::string, std::set<std::string>> out;
+    if (!P.table) build_table(P);
+    auto e = P.table->find(name);
+    if (e == P.table->end()) return out;
+    const Refs &nref = e->second.second;
+    const std::vector<std::string> &L = e->second.first;
+    std::set<int> used;
+    for (const std::string &l : L)
+        if (l.compare(0, 3, "TEX") == 0)
+            if (auto u = tex_unit(l); u && *u < 12) used.insert(*u);
+    std::vector<size_t> idx;
+    for (size_t k = 0; k < nref.size() && idx.size() < 3; k++)
+        if (nref[k].shrt == "missingtexture") idx.push_back(k);
+    if (idx.size() < 3 || idx[1] != idx[0] + 1 || idx[2] != idx[0] + 2 || idx[0] > 1) return out;
+    std::vector<size_t> S;
+    for (size_t k = idx[2] + 1; k < nref.size(); k++) S.push_back(k);
+    for (size_t k = 0; k < idx[0]; k++) S.push_back(k);
+    if (S.size() != used.size()) return out;
+    std::vector<int> order;
+    for (int x : used)
+        if (x) order.push_back(x);
+    if (used.count(0)) order.push_back(0);
+    std::map<int, size_t> um;
+    for (size_t k = 0; k < order.size(); k++) um.emplace(order[k], S[k]);
+    static const std::regex T(R"(^TEX\w* [^,]+, (-?)(f\[(TEX\d)\](\.(\w+))?|[^,]+), tex(\d+)$)");
+    for (const std::string &l : L) {
+        std::smatch m;
+        if (!std::regex_search(l, m, T)) continue;
+        auto ui = um.find(std::stoi(m[6].str()));
+        if (ui == um.end()) continue;
+        std::string c = "reg";
+        if (m[3].matched) {
+            std::string sw = m[5].matched ? m[5].str() : "xy";
+            c = m[3].str() + "." + sw.substr(0, std::min<size_t>(2, sw.size()));
+        }
+        out[nref[ui->second].full].insert(c);
+    }
+    return out;
+}
+
+}  // namespace u3::fp

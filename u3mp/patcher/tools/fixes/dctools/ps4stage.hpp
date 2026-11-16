@@ -30,6 +30,7 @@ struct Options {
                           // degenerate collision triangles, detail / height / glow / tint slots, blend polarity and source, spec maps
     fs::path water_templates;   // with fixes: the retail water.fx templates scored against the PS3 water materials
     const json::Value *gobo = nullptr;                         // {retail pak: {PS3 texture hash hex: PS4 short path}}
+    std::map<std::string, std::string> pins;                   // PS3 material -> pinned retail template key (data/overrides)
     std::shared_ptr<std::vector<BundleTex>> default_lightmaps;   // the two retail default lightmaps
     // Uncharted 2 (u2import.exe): its own LIGHT_TABLE_1, COLLISION_DATA_HAVOK_BG and WATER_DATA layouts replace the U3 ones
     std::function<std::shared_ptr<Blob>(const Pak &)> light_table;
@@ -42,6 +43,9 @@ struct Options {
     // the plan's summary line: '<stage>: N materials, N exact, N fallback; N source paks; N textures requested'
     std::string *plan_summary = nullptr;
     std::vector<std::string> exclude;   // retail paks the plan takes nothing from (besides the stage's own name)
+    // wall emblems (U3 '<map>-multi' levels): the triangles of the emblem materials that carry the emblem
+    // (bg::emblem_triangles) are left out of the level; the wall-emblem actors the levels driver builds hold them
+    bool emblem_walls = false;
 };
 Bytes stage_convert(const fs::path &ps3, const Options &o);
 // the sky rows (lib/build_skies.py with paktools-sky): the plan's sky materials re-pointed to retail sky-clouds.fx

@@ -984,6 +984,14 @@ Bytes convert(const fs::path &ps3_path, const fs::path &tmpl_path, const Kw &kw,
     // am: the PS3 material table's own textures per material (by hash)
     const std::map<std::string, std::set<uint32_t>> mattex = opt.am ? am_material_textures(src) : std::map<std::string, std::set<uint32_t>>{};
     auto has_mattex = [&](const std::string &mn) { auto it = mattex.find(mn); return it != mattex.end() && !it->second.empty(); };
+    // PS3 props on their own skeleton: the same table, used when no texture carries the material's name (below)
+    std::map<std::string, std::vector<uint32_t>> own_tex;   // material -> texture hashes in table order
+    if (!opt.am && kw.own_skel) try {
+            const AmTable t = am_read_materials(src);
+            for (const auto &[name, idx] : t.mats)
+                for (uint32_t i : idx) own_tex[name].push_back(t.texs.at(i).first);
+        } catch (const std::exception &) {
+        }
     auto pick_template = [&](const std::string &mname) -> const TMat * {
         const std::string key = ps4key(mname);
         for (const TMat &m : tmats)
@@ -1037,6 +1045,14 @@ Bytes convert(const fs::path &ps3_path, const fs::path &tmpl_path, const Kw &kw,
         const std::string stem = rsplit1_last(rsplit1_head(mname));
         for (Ps3Tex &e : ps3tex)
             if (has(e.shrt, stem)) own.push_back(&e);
+        // no texture named after the material: the PS3 material table's own textures (in table order). The word-score
+        // guess below took the first PS3 textures of the pak instead: Warzone's Fiat body ('fiat-main-noblend') got the
+        // glass colour and the grey flat map, a flat white car
+        if (own.empty())
+            if (auto mt = own_tex.find(mname); mt != own_tex.end())
+                for (uint32_t h : mt->second)
+                    for (Ps3Tex &e : ps3tex)
+                        if (e.hash == h && std::find(own.begin(), own.end(), &e) == own.end()) own.push_back(&e);
         if (own.empty()) {
             auto toks_of = [](const std::string &s, const char *seps) {
                 std::set<std::string> t;

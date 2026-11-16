@@ -100,6 +100,10 @@ struct Material3 {
     // 0x04000000): 1 alpha-tested, 0 not, -1 no pass node (unknown)
     int alpha_test = -1;
     int blend = -1;   // the first pass node blends (state word bit 0x02000000): 1 / 0, -1 unknown
+    // the first pass node draws both faces (state word bit 0x01000000 clear: 0x78800000 / 0xf8800000 / 0xf0800000 /
+    // 0x80800000): 1; it culls back faces (bit set): 0; -1 unknown. Retail PS4 agrees on the exact twins (321 of 322
+    // two-sided PS3 materials are GLOBAL_2SIDED on PS4, none of 4816 one-sided ones)
+    int two_sided = -1;
 };
 struct Texture3 {
     std::string name;
@@ -143,5 +147,13 @@ struct FgProto {
     std::vector<Ref> blocks;
 };
 std::vector<FgProto> fg_prototypes(const Pak &p);   // FOREGROUND_SECTION_2 name -> prototype + blocks (a later name replaces)
+
+// Wall emblems (U3 multiplayer levels): the triangles of a PS3 background block of an emblem material that carry the
+// emblem, i.e. whose emblem UVs (attribute 0x12, else 0x14) cover part of the square 0..1 (the triangle clipped to
+// the square keeps an area). The stage converter leaves these out of the level, the wall-emblem actor holds exactly
+// them, so wall + actor = the PS3 patch. Empty when the block has neither attribute.
+std::vector<bool> emblem_triangles(const Pak &p, const Ref &blk);
+// a material that carries the wall emblem: its name has 'emblem' in it
+bool emblem_material(const std::string &mat);
 
 }  // namespace u3::bg

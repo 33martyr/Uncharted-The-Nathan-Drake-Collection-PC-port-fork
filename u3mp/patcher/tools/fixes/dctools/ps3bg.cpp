@@ -557,10 +557,13 @@ void read_materials(const Pak &p, std::vector<Material3> &out, std::vector<Textu
                 // the first pass node blends (bit 0x02000000: 0xf2800000 / 0xf3800000): the material draws alpha-blended. Retail
                 // PS4 agrees on every exact twin: a pass-0 blend bit is TRANSPARENCY_ALPHA_BLEND, no bit never is
                 if (k == 0) mat.blend = (p.pu32(nd->first, nd->second + 0x20) & 0x02000000u) ? 1 : 0;
+                // the first pass node culls back faces (bit 0x01000000) or draws both (clear: foliage, cloth, reed mats)
+                if (mat.two_sided < 0) mat.two_sided = (p.pu32(nd->first, nd->second + 0x20) & 0x01000000u) ? 0 : 1;
             }
         } catch (const std::exception &) {
             mat.alpha_test = -1;
             mat.blend = -1;
+            mat.two_sided = -1;
         }
         if (!exact.empty()) mat.textures = exact;
         else {
@@ -829,6 +832,67 @@ std::vector<FgProto> fg_prototypes(const Pak &p) {
             e->proto = x.proto;
             e->blocks = x.blocks;
         }
+    }
+    return out;
+}
+
+}  // namespace u3::bg
+
+namespace u3::bg {
+
+bool emblem_material(const std::string &mat) { return mat.find("emblem") != std::string::npos; }
+
+std::vector<bool> emblem_triangles(const Pak &p, const Ref &blk) {
+    const auto [pg, bo] = blk;
+    const Ref cnt = need(p, pg, bo + 0x24);
+    const uint32_t nv = p.pu32(cnt.first, cnt.second);
+    const Ref f = need(p, pg, bo + 0x28), s = need(p, pg, bo);
+    const std::vector<Attr> attrs = read_format(p, f.first, f.second);
+    std::optional<Mat> uv;
+    for (int want : {0x12, 0x14}) {
+        for (size_t ai = 0; ai < attrs.size() && !uv; ai++) {
+            if (attrs[ai].id != want) continue;
+            const ORef rr = res(p, s.first, s.second + 8 * ai);
+            uv = decode_attr(p, f.first, f.second, attrs[ai], rr ? rr->first : 0, rr ? rr->second : 0, nv);
+        }
+        if (uv) break;
+    }
+    const Ref ii = need(p, pg, bo + 4);
+    const uint64_t ib = p.pbase(ii.first) + ii.second;
+    const uint32_t ntris = be16(p, ib), isz = be16(p, ib + 4);
+    const Ref idat = need(p, ii.first, ii.second + 8);
+    const uint64_t bi = p.pbase(idat.first) + idat.second;
+    if (bi + isz > p.d.size()) throw Stop("struct.error: index data past the end");
+    const auto tris = decode_indices(p.d.data() + bi, isz, ntris);
+    std::vector<bool> out(tris.size(), false);
+    if (!uv) return out;
+    for (size_t t = 0; t < tris.size(); t++) {
+        // Sutherland-Hodgman clip of the triangle's (u, v) to [0, 1] x [0, 1]; the emblem when an area is left
+        std::vector<std::array<double, 2>> poly;
+        for (uint32_t k : tris[t]) poly.push_back({uv->at(k, 0), uv->at(k, 1)});
+        for (int edge = 0; edge < 4 && !poly.empty(); edge++) {
+            const int c = edge / 2;
+            const bool low = edge % 2 == 0;
+            auto in = [&](const std::array<double, 2> &q) { return low ? q[size_t(c)] >= 0.0 : q[size_t(c)] <= 1.0; };
+            const double lim = low ? 0.0 : 1.0;
+            std::vector<std::array<double, 2>> nx;
+            for (size_t i = 0; i < poly.size(); i++) {
+                const auto &a = poly[i], &b = poly[(i + 1) % poly.size()];
+                const bool ia = in(a), ib2 = in(b);
+                if (ia) nx.push_back(a);
+                if (ia != ib2) {
+                    const double r = (lim - a[size_t(c)]) / (b[size_t(c)] - a[size_t(c)]);
+                    nx.push_back({a[0] + (b[0] - a[0]) * r, a[1] + (b[1] - a[1]) * r});
+                }
+            }
+            poly = std::move(nx);
+        }
+        double area = 0;
+        for (size_t i = 0; i < poly.size(); i++) {
+            const auto &a = poly[i], &b = poly[(i + 1) % poly.size()];
+            area += a[0] * b[1] - b[0] * a[1];
+        }
+        out[t] = std::fabs(area) > 1e-9;
     }
     return out;
 }

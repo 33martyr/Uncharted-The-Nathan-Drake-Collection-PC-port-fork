@@ -54,7 +54,9 @@ struct Plan {
 // pak_dir: the retail paks; given (U3), a PS3 material of another shader family than prime-shader (water meshes,
 // waterfall sheets and foam) is planned on the retail non-prime material whose constants match it
 Plan make_plan(const fs::path &ps3, const fs::path &res, const fs::path &water_templates = {}, const std::vector<std::string> &also_exclude = {},
-               const fs::path &pak_dir = {});
+               const fs::path &pak_dir = {}, const std::map<std::string, std::string> &pins = {});
+// pins (pak23-levels/data/overrides/<overlay>/<level>.json 'templates'): PS3 material -> the retail template key the owner
+// approved for it; the planner keeps that key (as texture twin when it is one, else as the fallback choice among its paks)
 std::string plan_json(const Plan &p);   // json.dump(plan, indent=1)
 
 // the device bundle: retail material records with their EFFECT closures, and texture descriptors + texels

@@ -5,7 +5,6 @@
 //     remove-rpcn-page  --project P [--apply]                                 (tools/fixes/no-rpcn-menu)
 //     world-levels      --project P [--ps4 D] [--apply]                       (tools/fixes/world-levels)
 //     netgame-order     --project P --net18 F [--apply | --verify] [...]      (tools/fixes/netgame-order)
-//     emblem-cap3       --project P [--apply]                                 (tools/fixes/wall-emblem-test)
 //     eula-box          --project P [--apply]                                 (tools/fixes/dctools)
 //     enemy-stall       --project P [--apply | --restore] [--only-tag-on-enter]  (tools/fixes/enemy-stall)
 //     coop-desc         --project P [--apply]                                 (tools/fixes/coop-chars)
@@ -51,7 +50,6 @@ int wmain(int argc, wchar_t **argv) {
         if (step == "remove-rpcn-page") return u3::remove_rpcn_page(a);
         if (step == "world-levels") return u3::world_levels(a);
         if (step == "netgame-order") return u3::netgame_order(a);
-        if (step == "emblem-cap3") return u3::emblem_cap3(a);
         if (step == "eula-box") return u3::eula_box(a);
         if (step == "enemy-stall") return u3::enemy_stall(a);
         if (step == "coop-desc") return u3::coop_desc(a);
@@ -83,8 +81,6 @@ int wmain(int argc, wchar_t **argv) {
         if (step == "shade-npc") return u3::shade_npc(a);
         if (step == "facility-collapse") return u3::facility_collapse(a);
         if (step == "eula-pages") return u3::eula_pages(a);
-        if (step == "wall-emblem") return u3::wall_emblem(a);
-        if (step == "wall-emblem-actors") return u3::wall_emblem_actors(a);
         if (step == "outdoor-jacket") return u3::outdoor_jacket(a);
         if (step == "lab-registration") return u3::lab_registration(a);
         if (step == "maps-batch-dc") return u3::maps_batch_dc(a);

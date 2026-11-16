@@ -1,28 +1,16 @@
-// Recipe steps wall-emblem and wall-emblem-actors: the Airstrip wall emblems as separate actors. Replaces
-// mkemblem_v2.py / mkemblem.py, prep_p3.py, apply_air_emblem.py and actor33/install_emblem_actors.py.
+// wall-emblem/make_emblem.cpp: the wall emblems of the Uncharted 3 multiplayer levels, part of the level conversion
+// (interface and overview: wall_emblem.hpp). Replaces the former recipe steps wall-emblem, wall-emblem-actors and
+// emblem-cap3 (and before them mkemblem_v2.py / mkemblem.py, prep_p3.py, apply_air_emblem.py, install_emblem_actors.py).
 //
-// The PS3 air-multi.pak draws the team emblems as background patches (materials with 'emblem' in the name). PS4 needs
-// them as foreground actors so the helper can set the emblem texture per instance:
-//   * every instance of every emblem material group of the PS3 PM_COLLECTION_2 becomes one patch: its blocks moved to
-//     world space by the instance matrix (normals / tangents by the matrix scaled to determinant 1), clipped along
-//     uv1 = 0 and 1 (pieces outside get uv1 (0, 0), so nothing relies on the overlay sampler's wrap mode);
-//   * each patch becomes an actor pak air-multi-emblem-<wall>[-<instance>].pak built on the retail loading-menu-cloth
-//     effects (its first two materials) and the 1-joint NdSimpleObject skeleton of cargo-plane-int-moving-multi: a
-//     single prototype, positions centred, a shared map with a flat normal and blue 166 (inside the retail cloth range,
-//     so layer 4 stays), white overlay and transparency, the wall's own colour map from the converted air-multi.pak,
-//     and an Overlay4 base in the wall's mean tone;
-//   * air-multi-ingame12.pak is converted again with one spawner per actor (NdSimpleObject at the patch centre);
-//   * the emblem submeshes of the converted air-multi.pak get all their indices set to 0 (hidden), and pak23_ps4.txt
-//     lists the actors after 'actor air-multi-wind-socks' in the air-multi block.
-// Everything is built from the current files in the same run, so no recorded hashes are needed: the state of the
-// overlay tells what is left to do.
-//
-//   u3fix wall-emblem --project P --job J --ps4 PS4 --ps3-disc D [--apply | --restore]
-//       the whole fix. Backups (once) in work/backup-wall-emblem/<path>; --restore puts them back and deletes the actors.
-//   u3fix wall-emblem-actors --project P --job J --ps4 PS4 --ps3-disc D [--apply]
-//       only the actor paks: an actor that is not the build (or the build with the cbuffer capacity 3 of emblem-cap3)
-//       is written again.
-// Dry run without --apply.
+// A patch = one PS3 instance of an emblem material group, reduced to the triangles that carry the emblem
+// (bg::emblem_triangles; the stage converter keeps the others in the level), moved to world space by the instance
+// matrix (normals / tangents by the matrix scaled to determinant 1) and clipped along uv1 = 0 and 1 (pieces outside
+// get uv1 (0, 0), so nothing relies on the overlay sampler's wrap mode). Its actor pak is built on the retail
+// loading-menu-cloth effects (its first two materials, the cloth's per-instance overlay) and the 1-joint
+// NdSimpleObject skeleton of cargo-plane-int-moving-multi: a single prototype, positions centred, a shared map with a
+// flat normal and blue 166, white overlay and transparency, the cbuffer capacity 3, and the wall's look baked into two
+// textures (the wall material's two colour layers with tint and brightness, blended by the PS3 vertex blend value and
+// the blend map): Color1Map in the patch's uv0 box, Overlay4Map (the cloth's layer 4 base) in the emblem square.
 #include "ndpak.hpp"
 #include "ps3bg.hpp"
 #include "ps4actor.hpp"
@@ -31,6 +19,7 @@
 #include "psarc.hpp"
 #include "texcodec.hpp"
 #include "u3fix.hpp"
+#include "wall_emblem.hpp"
 
 #include <array>
 #include <cmath>
@@ -54,9 +43,10 @@ struct Verts {
     std::vector<std::array<double, 3>> pos, nrm;
     std::vector<std::array<double, 2>> uv0, uv1;
     std::vector<std::array<double, 4>> tan;
+    std::vector<std::array<double, 1>> blend;   // the PS3 vertex blend value (attribute 0x15 first channel, -1..1; 1 without)
     size_t size() const { return pos.size(); }
     void push_from(const Verts &s, size_t i) {
-        pos.push_back(s.pos[i]), nrm.push_back(s.nrm[i]), uv0.push_back(s.uv0[i]), uv1.push_back(s.uv1[i]), tan.push_back(s.tan[i]);
+        pos.push_back(s.pos[i]), nrm.push_back(s.nrm[i]), uv0.push_back(s.uv0[i]), uv1.push_back(s.uv1[i]), tan.push_back(s.tan[i]); blend.push_back(s.blend[i]);
     }
 };
 using Tri = std::array<uint32_t, 3>;
@@ -140,7 +130,7 @@ void clip(Verts &V, std::vector<Tri> &tris, size_t &nout) {
             }
             vec.push_back(x);
         };
-        mix(V.pos), mix(V.uv0), mix(V.uv1), mix(V.nrm), mix(V.tan);
+        mix(V.pos), mix(V.uv0), mix(V.uv1), mix(V.nrm), mix(V.tan), mix(V.blend);
         return uint32_t(V.size() - 1);
     };
     std::vector<std::pair<Tri, bool>> cur;
@@ -226,7 +216,9 @@ std::vector<Patch> patches(const Pak &P3) {
                 for (uint32_t k = g.first; k < g.first + g.count; k++) {
                     const BgBlock d = decode_bg_block(P3, c.blocks.at(k));
                     const Mat &pos = attr(d, 1, "pos"), &nrm = attr(d, 2, "normal"), &tan = attr(d, 3, "tangent");
-                    const Mat &uv0 = attr(d, 0x11, "uv0"), &uv1 = attr(d, 0x12, "uv1");
+                    // the emblem UVs: the second set (0x12); a block without it carries them as 0x14 (Shambhala / Highrise plaster walls)
+                    const Mat &uv0 = attr(d, 0x11, "uv0"), &uv1 = d.a.count(0x12) ? attr(d, 0x12, "uv1") : attr(d, 0x14, "uv1");
+                    const std::vector<bool> em = bg::emblem_triangles(P3, c.blocks.at(k));   // the emblem area only (the stage converter keeps the rest)
                     for (uint32_t i = 0; i < d.nv; i++) {
                         const double ph[4] = {pos.at(i, 0), pos.at(i, 1), pos.at(i, 2), 1.0};
                         std::array<double, 3> w{};
@@ -250,9 +242,25 @@ std::vector<Patch> patches(const Pak &P3) {
                         pt.v.tan.push_back({t3[0], t3[1], t3[2], tan.cols > 3 ? tan.at(i, 3) : 1.0});
                         pt.v.uv0.push_back({uv0.at(i, 0), uv0.at(i, 1)});
                         pt.v.uv1.push_back({uv1.at(i, 0), uv1.at(i, 1)});
+                        pt.v.blend.push_back({d.a.count(0x15) ? d.a.at(0x15).at(i, 0) : 1.0});
                     }
-                    for (const Tri &t : d.tris) pt.tris.push_back({t[0] + base, t[1] + base, t[2] + base});
+                    for (size_t t = 0; t < d.tris.size(); t++)
+                        if (t < em.size() && em[t]) pt.tris.push_back({d.tris[t][0] + base, d.tris[t][1] + base, d.tris[t][2] + base});
                     base += d.nv;
+                }
+                if (pt.tris.empty()) continue;   // no triangle of this instance carries the emblem
+                {   // only the vertices of the emblem triangles, in their first-use order
+                    std::vector<int64_t> to(pt.v.size(), -1);
+                    Verts v2;
+                    for (Tri &t : pt.tris)
+                        for (uint32_t &x : t) {
+                            if (to[x] < 0) {
+                                to[x] = int64_t(v2.size());
+                                v2.push_from(pt.v, x);
+                            }
+                            x = uint32_t(to[x]);
+                        }
+                    pt.v = std::move(v2);
                 }
                 clip(pt.v, pt.tris, pt.nout);
                 res.push_back(std::move(pt));
@@ -286,6 +294,146 @@ struct Built {
     std::array<double, 3> center;
     size_t verts, tris, nout;
 };
+
+// ---- the wall's look baked into the actor's own textures ---------------------------------------------------------
+// The actor cannot use the wall's material (only the cloth effect draws a per-instance emblem), so the wall's albedo
+// at the patch is baked: the wall material's two colour layers (PS4 converted colour maps, each with its tint and
+// brightness), blended by the PS3 vertex blend value (attribute 0x15: -1 = the second layer, 1 = the first) moved by
+// the blend map. A layer: a decoded colour map (or none) and its multiplier.
+struct BakeLayer {
+    std::optional<tc::Img> img;
+    std::array<double, 3> mul = {1, 1, 1};
+};
+// sample an image at (u, v) with wrap, bilinear
+std::array<double, 3> sample(const tc::Img &im, double u, double v) {
+    const double x = (u - std::floor(u)) * im.w - 0.5, y = (v - std::floor(v)) * im.h - 0.5;
+    const int x0 = int(std::floor(x)), y0 = int(std::floor(y));
+    const double fx = x - x0, fy = y - y0;
+    std::array<double, 3> o{};
+    for (int dy = 0; dy < 2; dy++)
+        for (int dx = 0; dx < 2; dx++) {
+            const uint32_t xx = uint32_t(((x0 + dx) % int(im.w) + int(im.w)) % int(im.w)), yy = uint32_t(((y0 + dy) % int(im.h) + int(im.h)) % int(im.h));
+            const double wgt = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+            const uint8_t *p = im.at(xx, yy);
+            for (int c = 0; c < 3; c++) o[size_t(c)] += wgt * p[c];
+        }
+    return o;
+}
+// rasterize the patch's triangles into a w x h image in the coordinates crd(i) (0..1); per texel the wall albedo at
+// the interpolated uv0 and blend value; empty texels are filled from their neighbours
+tc::Img bake(const Patch &pt, const std::vector<Tri> &tris, const std::function<std::array<double, 2>(uint32_t)> &crd, uint32_t w, uint32_t h,
+             const BakeLayer &l1, const BakeLayer &l2, const std::optional<tc::Img> &blendmap) {
+    tc::Img im;
+    im.w = w, im.h = h;
+    im.px.assign(size_t(w) * h * 4, 0);
+    std::vector<uint8_t> set(size_t(w) * h, 0);
+    for (const Tri &t : tris) {
+        std::array<double, 2> q[3];
+        for (int k = 0; k < 3; k++) q[k] = crd(t[size_t(k)]), q[k][0] *= w, q[k][1] *= h;
+        const double den = (q[1][1] - q[2][1]) * (q[0][0] - q[2][0]) + (q[2][0] - q[1][0]) * (q[0][1] - q[2][1]);
+        if (std::fabs(den) < 1e-12) continue;
+        const int x0 = std::max(0, int(std::floor(std::min({q[0][0], q[1][0], q[2][0]})))), x1 = std::min(int(w) - 1, int(std::ceil(std::max({q[0][0], q[1][0], q[2][0]}))));
+        const int y0 = std::max(0, int(std::floor(std::min({q[0][1], q[1][1], q[2][1]})))), y1 = std::min(int(h) - 1, int(std::ceil(std::max({q[0][1], q[1][1], q[2][1]}))));
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
+                const double px = x + 0.5, py = y + 0.5;
+                const double a = ((q[1][1] - q[2][1]) * (px - q[2][0]) + (q[2][0] - q[1][0]) * (py - q[2][1])) / den;
+                const double b = ((q[2][1] - q[0][1]) * (px - q[2][0]) + (q[0][0] - q[2][0]) * (py - q[2][1])) / den;
+                const double c = 1 - a - b;
+                const double e = -1e-3;
+                if (a < e || b < e || c < e) continue;
+                const double bw[3] = {a, b, c};
+                double u = 0, v = 0, bl = 0;
+                for (int k = 0; k < 3; k++) {
+                    u += bw[k] * pt.v.uv0[t[size_t(k)]][0], v += bw[k] * pt.v.uv0[t[size_t(k)]][1];
+                    bl += bw[k] * pt.v.blend[t[size_t(k)]][0];
+                }
+                double f = std::clamp((bl + 1) / 2, 0.0, 1.0);   // weight of the first layer
+                if (blendmap) f = std::clamp(f + (sample(*blendmap, u, v)[0] / 255.0 - 0.5) * 0.5, 0.0, 1.0);
+                std::array<double, 3> c1{}, c2{};
+                if (l1.img) c1 = sample(*l1.img, u, v);
+                c2 = l2.img ? sample(*l2.img, u, v) : c1;
+                if (!l2.img) f = 1;
+                uint8_t *o = im.at(uint32_t(x), uint32_t(y));
+                for (int ch = 0; ch < 3; ch++) {
+                    const double x1c = c1[size_t(ch)] * l1.mul[size_t(ch)], x2c = c2[size_t(ch)] * l2.mul[size_t(ch)];
+                    o[ch] = uint8_t(std::clamp(f * x1c + (1 - f) * x2c, 0.0, 255.0) + 0.5);
+                }
+                o[3] = 255;
+                set[size_t(y) * w + size_t(x)] = 1;
+            }
+    }
+    // fill the empty texels from their set neighbours (a few rings), then the rest with the mean
+    double mean[3] = {0, 0, 0};
+    size_t n = 0;
+    for (size_t i = 0; i < set.size(); i++)
+        if (set[i]) {
+            for (int c = 0; c < 3; c++) mean[c] += im.px[i * 4 + size_t(c)];
+            n++;
+        }
+    for (int c = 0; c < 3; c++) mean[c] = n ? mean[c] / double(n) : 128;
+    for (int ring = 0; ring < 8; ring++) {
+        std::vector<uint8_t> nset = set;
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++) {
+                if (set[size_t(y) * w + x]) continue;
+                double acc[3] = {0, 0, 0};
+                int k = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++) {
+                        const int xx = int(x) + dx, yy = int(y) + dy;
+                        if (xx < 0 || yy < 0 || xx >= int(w) || yy >= int(h) || !set[size_t(yy) * w + size_t(xx)]) continue;
+                        const uint8_t *p = im.at(uint32_t(xx), uint32_t(yy));
+                        for (int c = 0; c < 3; c++) acc[c] += p[c];
+                        k++;
+                    }
+                if (!k) continue;
+                uint8_t *o = im.at(x, y);
+                for (int c = 0; c < 3; c++) o[c] = uint8_t(acc[c] / k + 0.5);
+                o[3] = 255;
+                nset[size_t(y) * w + x] = 1;
+            }
+        set = std::move(nset);
+    }
+    for (size_t i = 0; i < set.size(); i++)
+        if (!set[i]) {
+            for (int c = 0; c < 3; c++) im.px[i * 4 + size_t(c)] = uint8_t(mean[c] + 0.5);
+            im.px[i * 4 + 3] = 255;
+        }
+    return im;
+}
+// PS3-linear BC3 blocks of the image and its box-filtered mips down to 1 x 1, and the mip count
+std::pair<Bytes, uint32_t> bc3_mips(tc::Img im) {
+    Bytes out;
+    uint32_t mips = 0;
+    while (true) {
+        const Bytes b = tc::encode_bc3(im);
+        out.insert(out.end(), b.begin(), b.end());
+        mips++;
+        if (im.w == 1 && im.h == 1) break;
+        tc::Img nx;
+        nx.w = std::max(1u, im.w / 2), nx.h = std::max(1u, im.h / 2);
+        nx.px.assign(size_t(nx.w) * nx.h * 4, 0);
+        for (uint32_t y = 0; y < nx.h; y++)
+            for (uint32_t x = 0; x < nx.w; x++)
+                for (int c = 0; c < 4; c++) {
+                    unsigned s = 0, k = 0;
+                    for (uint32_t dy = 0; dy < 2; dy++)
+                        for (uint32_t dx = 0; dx < 2; dx++) {
+                            const uint32_t xx = std::min(im.w - 1, 2 * x + dx), yy = std::min(im.h - 1, 2 * y + dy);
+                            s += im.at(xx, yy)[c], k++;
+                        }
+                    nx.at(x, y)[c] = uint8_t((s + k / 2) / k);
+                }
+        im = std::move(nx);
+    }
+    return {out, mips};
+}
+uint32_t pow2_in(double x, uint32_t lo, uint32_t hi) {
+    uint32_t p = lo;
+    while (p < hi && p < x) p *= 2;
+    return p;
+}
 
 Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
     PakWriter w;
@@ -354,8 +502,7 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
     const size_t pk = full.find(cook_prefix());
     const std::string shrt = pk != std::string::npos ? full.substr(pk + cook_prefix().size()) : full;
     const Bytes tvram = in.MAP.vram_bytes(t.vramOffset, t.vramSize);
-    TexP ecol = add(shrt, t.hash, t.format, t.width, t.height, t.mips, tvram, t.unk34, t.unk20);
-    ecol->full = full;
+    TexP ecol;   // the bake below (the wall colour map itself is not carried)
     const uint32_t c_shared[3] = {128, 128, 166}, c_white[3] = {255, 255, 255};
     TexP eshared = flat("shared-flat-b166", c_shared);
     TexP ewhite = flat("white", c_white);
@@ -381,7 +528,64 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
         const double x = mean * std::pow(tint[size_t(c)], 1 / 2.2) * 255;
         tone[c] = uint32_t(int(std::min(std::max(x, 0.0), 255.0)));
     }
-    TexP etone = flat("tone-" + art, tone, 0x48);
+    (void)tone;
+
+    // the wall's look baked: layer 1 / 2 colour maps of the wall material with their tint and brightness, blended by the
+    // PS3 vertex blend value and the blend map. Color1Map = the bake in the patch's uv0 box (the actor's uv0 is
+    // written as that box's 0..1), Overlay4Map (the base of the cloth's layer 4, on uv1) = the bake in the emblem
+    // square: both layers of the cloth then show the same wall.
+    auto decode_bind = [&](const char *pname) -> std::optional<tc::Img> {
+        for (const auto &bd : mm.binds) {
+            if (bd.pname != pname) continue;
+            auto it = in.maptx.find(bd.full);
+            if (it == in.maptx.end()) it = in.maptx.find(bd.full + ".ndb");
+            if (it == in.maptx.end()) return std::nullopt;
+            const PakTexture &x = it->second;
+            std::string kd;
+            int bb;
+            switch (x.format) {
+            case 0x47: case 0x48: kd = "BC1", bb = 8; break;
+            case 0x4a: case 0x4b: kd = "BC2", bb = 16; break;
+            case 0x4d: case 0x4e: kd = "BC3", bb = 16; break;
+            default: return std::nullopt;
+            }
+            return tc::decode(tc::ps4_mip0_linear(in.MAP.vram_bytes(x.vramOffset, x.vramSize), x.width, x.height, bb), x.width, x.height, kd);
+        }
+        return std::nullopt;
+    };
+    auto layer_mul = [&](int k) {
+        const std::string tk = "g_colorTint" + std::to_string(k), bk = "g_colorBrightness" + std::to_string(k);
+        const std::array<double, 3> tn = pv3.count(tk) ? pv3[tk] : one;
+        const double br = pv.count(bk) ? pv[bk] : 1.0;
+        std::array<double, 3> m{};
+        for (int c = 0; c < 3; c++) m[size_t(c)] = std::pow(std::max(0.0, tn[size_t(c)] * br), 1 / 2.2);
+        return m;
+    };
+    BakeLayer l1, l2;
+    l1.img = img, l1.mul = layer_mul(1);
+    l2.img = decode_bind("g_tNdFetchColor2Map"), l2.mul = layer_mul(2);
+    const std::optional<tc::Img> bmap = decode_bind("g_tNdFetchBlendMap");
+    double umin = 1e30, umax = -1e30, vmin = 1e30, vmax = -1e30;
+    for (const auto &u : pt.v.uv0) umin = std::min(umin, u[0]), umax = std::max(umax, u[0]), vmin = std::min(vmin, u[1]), vmax = std::max(vmax, u[1]);
+    const double du = std::max(umax - umin, 1e-6), dv = std::max(vmax - vmin, 1e-6);
+    const uint32_t bw = pow2_in(du * img.w, 16, 256), bh = pow2_in(dv * img.h, 16, 256);
+    const tc::Img bakeA = bake(pt, pt.tris, [&](uint32_t i) { return std::array<double, 2>{(pt.v.uv0[i][0] - umin) / du, (pt.v.uv0[i][1] - vmin) / dv}; }, bw, bh,
+                               l1, l2, bmap);
+    std::vector<Tri> inside;   // the pieces in the emblem square (the clip gives the others uv1 (0, 0))
+    for (const Tri &t : pt.tris) {
+        bool out = true;
+        for (uint32_t k : t) out = out && pt.v.uv1[k][0] == 0.0 && pt.v.uv1[k][1] == 0.0;
+        if (!out) inside.push_back(t);
+    }
+    const tc::Img bakeB = bake(pt, inside, [&](uint32_t i) { return std::array<double, 2>{pt.v.uv1[i][0], pt.v.uv1[i][1]}; }, 128, 128, l1, l2, bmap);
+    auto add_bake = [&](const std::string &tag, const tc::Img &im) {
+        const auto [lin, mips] = bc3_mips(im);
+        const Bytes tiled = tc::ps3_to_ps4_texels(lin, im.w, im.h, mips, 16);
+        const std::string sh = u3::fmt("art/generated/u3mp/%s-%s.tga/%016X.ndb", art.c_str(), tag.c_str(), sid(art + "-" + tag));
+        return add(sh, sid(sh), 0x4e, im.w, im.h, mips, tiled);
+    };
+    ecol = add_bake("wall", bakeA);
+    TexP etone = add_bake("wall-emblem-square", bakeB);
 
     // two materials: the cloth's first (the emblem) with the wall's tint, brightness and specular, and its second
     const std::vector<TMat> &tm = in.tm;
@@ -396,8 +600,8 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
     auto ov = [&](const std::string &nm, const Bytes &vals) -> Bytes {
         auto starts = [&](const char *s) { return nm.rfind(s, 0) == 0; };
         if (nm == "g_ambientOcclusionTint" || starts("g_facingTintIn") || starts("g_facingTintOut")) return pack4(1, 1, 1, 0);
-        if (nm == "g_colorTint1") return pack4(tint[0], tint[1], tint[2], 0);
-        if (nm == "g_colorBrightness1") return pack4(get("g_colorBrightness1", get("g_colorBrightness2", 1.0)), 0, 0, 0);
+        if (nm == "g_colorTint1") return pack4(1, 1, 1, 0);         // tint and brightness are in the bake
+        if (nm == "g_colorBrightness1") return pack4(1, 0, 0, 0);
         if (nm == "g_normalStrength1" || nm == "g_specularMetalness" || nm == "g_uvOffsetU2" || nm == "g_uvOffsetV2") return pack4(0, 0, 0, 0);
         if (nm == "g_specularBrightness") return pack4(get("g_specularBrightness", 0.0), 0, 0, 0);
         if (nm == "g_specularExponentMax") return pack4(get("g_specularExponentMax", 10.0), 0, 0, 0);
@@ -483,7 +687,8 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
     for (size_t i = 0; i < nv; i++) {
         const uint8_t *pb = reinterpret_cast<const uint8_t *>(pos[i].data());
         sp0.insert(sp0.end(), pb, pb + 12);
-        for (int k = 0; k < 2; k++) h16(s1, v.uv0[i][size_t(k)]), h16(s12, v.uv1[i][size_t(k)]);
+        h16(s1, (v.uv0[i][0] - umin) / du), h16(s1, (v.uv0[i][1] - vmin) / dv);   // uv0 = the bake's box
+        for (int k = 0; k < 2; k++) h16(s12, v.uv1[i][size_t(k)]);
         for (int k = 0; k < 3; k++) h16(s2, v.nrm[i][size_t(k)]);
         h16(s2, 1.0);
         for (int k = 0; k < 4; k++) h16(s3, v.tan[i][size_t(k)]), h16(s4, 1.0);
@@ -508,9 +713,9 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
         const uint8_t *ob = reinterpret_cast<const uint8_t *>(&one_f);
         ws.insert(ws.end(), ob, ob + 4);
     }
-    auto bc = raw(cnts), bo = raw(offs), bj = raw(js), bw = raw(ws);
+    auto bc = raw(cnts), bo = raw(offs), bj = raw(js), bwt = raw(ws);
     auto skb = std::make_shared<Blob>("skin");
-    skb->u32(0).u32(uint32_t(nv)).ptr(bc).ptr(bo).ptr(bj).ptr(bw);
+    skb->u32(0).u32(uint32_t(nv)).ptr(bc).ptr(bo).ptr(bj).ptr(bwt);
     auto ski = p0.item("RAW_DATA", skb);
     const Pak &SK = in.SK;
     const auto jhs = SK.items_of("JOINT_HIERARCHY"), fgs = SK.items_of("FOREGROUND_SECTION_2");
@@ -641,217 +846,81 @@ Built build_actor(const Inputs &in, const std::string &art, const Patch &pt) {
     return r;
 }
 
+// Airstrip's actor names (kept: its paks and old installs use them)
 const std::vector<std::pair<std::string, std::string>> SHORT = {{"ground-concrete", "ground"},      {"metal-diamond", "diamond"}, {"corrugated-main-blue", "corr-blue"},
                                                                 {"corrugated-main", "corr"},        {"control-tower", "tower"},   {"stucco-brown", "stucco"},
                                                                 {"blackboard", "board"}};
+const std::string AIR = "air-multi";
 
-struct Job {
-    std::string P, main;
-    fs::path retail;
-    Bytes p3map, p3ingame;
-    fs::path levels_data;
-};
-
-Job job_of(const Args &a) {
-    Job j;
-    j.P = a.need("--project");
-    j.main = j.P + "/work/overlay-r3/u3data/build/main/";
-    j.retail = upath(a.need("--ps4")) / "u3data" / "build" / "main" / "actor33" / "ps4";
-    j.levels_data = upath(a.need("--job")) / ".." / "pak23-levels" / "data" / "conv_anim_actors.json";
-    Psarc A(upath(a.need("--ps3-disc")) / "build" / "main" / "pak23.psarc");   // the PS3 levels the conversion used
-    for (const char *n : {"air-multi.pak", "air-multi-ingame12.pak"}) {
-        bool found = false;
-        for (size_t i = 0; i < A.names.size() && !found; i++) {
-            std::string x = "/" + A.names[i];
-            for (char &ch : x)
-                if (ch == '\\') ch = '/';
-            const std::string want = std::string("/") + n;
-            if (x.size() >= want.size() && x.compare(x.size() - want.size(), want.size(), want) == 0) {
-                (std::string(n) == "air-multi.pak" ? j.p3map : j.p3ingame) = A.read(i + 1);
-                found = true;
-            }
-        }
-        if (!found) throw Stop(std::string(n) + " not in pak23.psarc");
-    }
-    return j;
-}
-
-std::vector<Built> build_actors(const Job &j, std::vector<Patch> &pts) {
-    const fs::path mp = upath(j.main + "pak23/ps4/air-multi.pak");
-    if (!fs::exists(mp)) throw Stop("missing " + j.main + "pak23/ps4/air-multi.pak (the converted level; convert-levels-r3 first)");
-    Inputs in{Pak(j.retail / "loading-menu-cloth.pak"), Pak(j.retail / "cargo-plane-int-moving-multi.pak"), Pak(mp), {}, {}, {}};
-    in.tm = tmpl_materials(in.T);
-    for (const PakTexture &t : in.MAP.textures()) in.maptx[t.path] = t;
-    for (const TMat &m : tmpl_materials(in.MAP)) in.mapm[m.name.substr(0, m.name.find(','))] = m;
-    for (const PakItem &i : in.T.items)   // the cloth prototypes' cbuffer capacities (at least 8 / 1)
-        if (i.type == "RAW_DATA" && i.size >= 0x38) {
-            const uint64_t o = in.T.pbase(i.page) + i.data_off();
-            if (rd32le(in.T.d, o) == 3 && rd32le(in.T.d, o + 12) == 0x5791a421)
-                in.cb3 = std::max(in.cb3, rd32le(in.T.d, o + 0x30)), in.cb4 = std::max(in.cb4, rd32le(in.T.d, o + 0x34));
-        }
-    const Pak P3(j.p3map, "air-multi.pak");
-    pts = patches(P3);
-    std::vector<Built> out;
+// the actor names of a level's patches: Airstrip air-multi-emblem-<wall>[-<instance>], the others
+// '<level>-emblem-<n>' / '<level>-emblem-board-<n>' (the helper's wall walk takes '-multi-emblem-' and 'boa' after it)
+std::vector<std::string> art_names(const std::string &level, const std::vector<Patch> &pts) {
+    std::vector<std::string> out;
+    int n = 0, nb = 0;
     for (const Patch &pt : pts) {
-        std::string s;
-        for (const auto &[k, v] : SHORT)
-            if (pt.mat.find(k) != std::string::npos) {
-                s = v;
-                break;
-            }
-        if (s.empty()) throw Stop("IndexError: no short name for " + pt.mat);
-        const std::string art = "air-multi-emblem-" + s + (pt.blackboard ? "-" + std::to_string(pt.inst) : "");
-        out.push_back(build_actor(in, art, pt));
-        const Built &r = out.back();
-        std::printf("%s %zu %zu outside %zu %s %zu %#x\n", art.c_str(), r.verts, r.tris, r.nout, r.color.c_str(), r.pak.size(), sid(art + "-spawner"));
+        if (level == AIR) {
+            std::string s;
+            for (const auto &[k, v] : SHORT)
+                if (pt.mat.find(k) != std::string::npos) {
+                    s = v;
+                    break;
+                }
+            if (s.empty()) throw Stop("IndexError: no short name for " + pt.mat);
+            out.push_back("air-multi-emblem-" + s + (pt.blackboard ? "-" + std::to_string(pt.inst) : ""));
+        } else
+            out.push_back(level + "-emblem-" + (pt.blackboard ? "board-" + std::to_string(nb++) : std::to_string(n++)));
     }
     return out;
 }
 
-// the build with emblem-cap3's change: the prototype's cbuffer capacity 3 (all but the ground pak)
-Bytes with_cap3(const Built &b) {
-    if (b.art == "air-multi-emblem-ground") return b.pak;
-    Bytes d = b.pak;
-    const uint8_t sig[16] = {3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x21, 0xa4, 0x91, 0x57};
-    for (size_t o = 0; o + 0x38 <= d.size(); o += 16)
-        if (std::memcmp(&d[o], sig, 16) == 0) {
-            d[o + 0x30] = 3, d[o + 0x31] = d[o + 0x32] = d[o + 0x33] = 0;
-            return d;
-        }
-    return d;
+// the centre of a patch's box (where its actor is placed; build_actor centres the positions on it)
+std::array<double, 3> patch_center(const Patch &pt) {
+    std::array<double, 3> c{};
+    for (int k = 0; k < 3; k++) {
+        double lo = pt.v.pos[0][size_t(k)], hi = lo;
+        for (const auto &p : pt.v.pos) lo = std::min(lo, p[size_t(k)]), hi = std::max(hi, p[size_t(k)]);
+        c[size_t(k)] = (lo + hi) / 2;
+    }
+    return c;
 }
 
 }  // namespace
 
-int wall_emblem_actors(const std::vector<std::string> &argv) {
-    const Args a(argv, {"--apply"}, {"--project", "--job", "--ps4", "--ps3-disc"});
-    const Job j = job_of(a);
-    std::vector<Patch> pts;
-    const std::vector<Built> bs = build_actors(j, pts);
-    const std::string dst = j.main + "actor33/ps4/";
-    int todo = 0;
-    for (const Built &b : bs) {
-        const fs::path f = upath(dst + b.art + ".pak");
-        if (fs::exists(f)) {
-            const Bytes cur = read_file(f);
-            if (cur == b.pak || cur == with_cap3(b)) continue;
-        }
-        todo++;
-        std::printf("install %s %s\n", b.art.c_str(), sha256_hex(b.pak).substr(0, 16).c_str());
-        if (a.has("--apply")) {
-            fs::create_directories(upath(dst));
-            write_file_replace(f, b.pak);
-        }
+namespace wallemblem {
+
+bool emblem_level(const std::string &level) { return level.size() > 6 && level.compare(level.size() - 6, 6, "-multi") == 0; }
+
+std::vector<ExtraSpawner> spawners(const Pak &p3stage, const std::string &level) {
+    const std::vector<Patch> pts = patches(p3stage);
+    const std::vector<std::string> names = art_names(level, pts);
+    std::vector<ExtraSpawner> out;
+    for (size_t i = 0; i < pts.size(); i++) {
+        const auto c = patch_center(pts[i]);
+        out.push_back({names[i] + "-spawner", names[i], {c[0], c[1], c[2]}});
     }
-    if (!todo) std::printf("emblem actors already installed (%zu)\n", bs.size());
-    else std::printf("%s\n", a.has("--apply") ? "done" : "dry run: nothing written (use --apply)");
-    return 0;
+    return out;
 }
 
-int wall_emblem(const std::vector<std::string> &argv) {
-    const Args a(argv, {"--apply", "--restore"}, {"--project", "--job", "--ps4", "--ps3-disc"});
-    const bool apply = a.has("--apply");
-    const std::string P = a.need("--project");
-    const std::string MAIN = P + "/work/overlay-r3/u3data/build/main/", BAK = P + "/work/backup-wall-emblem/";
-    const std::vector<std::string> files = {"pak23/ps4/air-multi.pak", "pak23/ps4/air-multi-ingame12.pak", "pak23_ps4.txt"};
-    if (a.has("--restore")) {
-        for (const std::string &rel : files) {
-            std::printf("restore %s\n", rel.c_str());
-            if (!fs::exists(upath(BAK + rel))) throw Stop("no backup: " + BAK + rel);
-            if (apply) copy2(upath(BAK + rel), upath(MAIN + rel));
+std::vector<std::pair<std::string, Bytes>> actors(const Pak &p3stage, const std::string &level, const Pak &converted, const fs::path &retail_actor33) {
+    const std::vector<Patch> pts = patches(p3stage);
+    if (pts.empty()) return {};
+    const std::vector<std::string> names = art_names(level, pts);
+    Inputs in{Pak(retail_actor33 / "loading-menu-cloth.pak"), Pak(retail_actor33 / "cargo-plane-int-moving-multi.pak"), converted, {}, {}, {}};
+    in.tm = tmpl_materials(in.T);
+    // the per-instance cbuffer capacity the game needs (crashcheck G6: one feature set + 2), written directly
+    in.cb3 = 3, in.cb4 = 1;
+    for (const PakItem &i : in.T.items)
+        if (i.type == "RAW_DATA" && i.size >= 0x38) {
+            const uint64_t o = in.T.pbase(i.page) + i.data_off();
+            if (rd32le(in.T.d, o) == 3 && rd32le(in.T.d, o + 12) == 0x5791a421) in.cb4 = std::max(in.cb4, rd32le(in.T.d, o + 0x34));
         }
-        for (const auto &e : fs::directory_iterator(upath(MAIN + "actor33/ps4"))) {
-            const std::string n = utf8(e.path().filename());
-            if (n.rfind("air-multi-emblem-", 0) == 0 && n.size() > 4 && n.compare(n.size() - 4, 4, ".pak") == 0) {
-                std::printf("delete actor %s\n", n.substr(0, n.size() - 4).c_str());
-                if (apply) fs::remove(e.path());
-            }
-        }
-        std::printf("%s\n", apply ? "restored" : "dry run: nothing written (use --apply)");
-        return 0;
-    }
-    const Job j = job_of(a);
-    std::vector<Patch> pts;
-    const std::vector<Built> bs = build_actors(j, pts);
-    // the level paks: the ingame12 converted again with the spawners, the emblem submeshes of air-multi.pak hidden
-    const std::set<std::string> anim = anim_actor_names(j.retail, j.levels_data);
-    const Pak p3ig(j.p3ingame, "air-multi-ingame12.pak");
-    std::vector<ExtraSpawner> extra;
-    for (const Built &b : bs) extra.push_back({b.art + "-spawner", b.art, {b.center[0], b.center[1], b.center[2]}});
-    const Bytes ingame = ps4ingame_convert(p3ig, anim, extra);
-    Bytes map = read_file(upath(MAIN + files[0]));
-    const Bytes map0 = map;
-    {
-        const Pak M(map0, "air-multi.pak");
-        const auto gs = M.items_of("GEOMETRY_1");
-        if (gs.empty()) throw Stop("IndexError: air-multi.pak without GEOMETRY_1");
-        const uint32_t pg = gs[0].page;
-        const uint64_t gb = gs[0].data_off();
-        const uint64_t ns = M.u64(M.pbase(pg) + gb + 8);
-        const Ref sr = bg::need(M, pg, gb + 0x10);
-        std::vector<std::pair<std::string, uint32_t>> hidden;
-        for (uint64_t i = 0; i < ns; i++) {
-            const uint64_t o = sr.second + 0x88 * i;
-            const Ref mr = bg::need(M, sr.first, o + 0x48);
-            const std::string mat = M.pstr(mr.first, mr.second);
-            if (mat.find("emblem") == std::string::npos) continue;
-            const uint32_t ni = M.pu32(sr.first, o + 0x24);
-            const Ref ib = bg::need(M, sr.first, o + 0x40);
-            const uint64_t f = M.pbase(ib.first) + ib.second;
-            if (ni % 3) throw Stop("AssertionError: emblem submesh index count");
-            if (f + 2ull * ni > map.size()) throw Stop("struct.error: emblem indices past the end");
-            std::fill(map.begin() + std::ptrdiff_t(f), map.begin() + std::ptrdiff_t(f + 2ull * ni), uint8_t(0));
-            const Ref nr = bg::need(M, sr.first, o + 8);
-            hidden.push_back({M.pstr(nr.first, nr.second), ni});
-        }
-        std::printf("hidden");
-        for (const auto &[s, n] : hidden) std::printf(" %s:%u", s.c_str(), n);
-        std::printf("\n");
-    }
-    const bool map_done = map == map0;
-    const Bytes cur_ig = fs::exists(upath(MAIN + files[1])) ? read_file(upath(MAIN + files[1])) : Bytes();
-    const bool ig_done = cur_ig == ingame;
-    const Bytes txt = read_file(upath(MAIN + files[2]));
-    const std::string ts(txt.begin(), txt.end());
-    const std::string nl = ts.find("\r\n") != std::string::npos ? "\r\n" : "\n";
-    const bool lines = ts.find("air-multi-emblem") != std::string::npos;
-    std::string newtxt = ts;
-    if (!lines) {
-        const std::string head = "level-name air-multi" + nl, anchor = "actor air-multi-wind-socks" + nl;
-        const size_t i = ts.find(head);
-        size_t k = i == std::string::npos ? i : ts.find(anchor, i);
-        const size_t nxt = i == std::string::npos ? i : ts.find("level-name ", i + head.size());
-        if (i == std::string::npos || k == std::string::npos || (nxt != std::string::npos && nxt < k)) throw Stop("air-multi level block not found");
-        k += anchor.size();
-        std::string add;
-        for (const Built &b : bs) add += "actor " + b.art + nl;
-        newtxt = ts.substr(0, k) + add + ts.substr(k);
-    }
-    std::vector<const Built *> acts;   // actor paks that are missing (an existing one is the build or a later step's edit of it)
-    for (const Built &b : bs)
-        if (!fs::exists(upath(MAIN + "actor33/ps4/" + b.art + ".pak"))) acts.push_back(&b);
-    if (map_done && ig_done && lines && acts.empty()) {
-        std::printf("already installed: %zu actors, ingame12 with their spawners, background patches hidden, registry lines present\n", bs.size());
-        return 0;
-    }
-    std::printf("install: %zu actor paks, %s, %s, %s\n", acts.size(), ig_done ? "ingame12 already rebuilt" : "ingame12 rebuilt with the spawners",
-                map_done ? "patches already hidden" : "background patches hidden", lines ? "registry lines present" : "the actor lines added to the air-multi block");
-    if (!apply) {
-        std::printf("dry run: nothing written (use --apply)\n");
-        return 0;
-    }
-    for (const std::string &rel : files)   // the first state is kept: an earlier pass's backup stays
-        if (!fs::exists(upath(BAK + rel))) {
-            fs::create_directories(upath(BAK + rel).parent_path());
-            copy2(upath(MAIN + rel), upath(BAK + rel));
-        }
-    fs::create_directories(upath(MAIN + "actor33/ps4"));
-    for (const Built *b : acts) write_file_replace(upath(MAIN + "actor33/ps4/" + b->art + ".pak"), b->pak);
-    if (!ig_done) write_file_replace(upath(MAIN + files[1]), ingame);
-    if (!map_done) write_file_replace(upath(MAIN + files[0]), map);
-    if (!lines) write_file_replace(upath(MAIN + files[2]), Bytes(newtxt.begin(), newtxt.end()));
-    std::printf("done; backups in %s\n", BAK.c_str());
-    return 0;
+    for (const PakTexture &t : in.MAP.textures()) in.maptx[t.path] = t;
+    for (const TMat &m : tmpl_materials(in.MAP)) in.mapm[m.name.substr(0, m.name.find(','))] = m;
+    std::vector<std::pair<std::string, Bytes>> out;
+    for (size_t i = 0; i < pts.size(); i++) out.push_back({names[i], build_actor(in, names[i], pts[i]).pak});
+    return out;
 }
+
+}  // namespace wallemblem
 
 }  // namespace u3

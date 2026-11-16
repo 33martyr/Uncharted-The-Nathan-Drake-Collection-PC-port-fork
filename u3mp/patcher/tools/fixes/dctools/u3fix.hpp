@@ -42,7 +42,6 @@ int hud_mod_mips(const std::vector<std::string> &argv);       // tools/fixes/hud
 int remove_rpcn_page(const std::vector<std::string> &argv);   // tools/fixes/no-rpcn-menu/remove_rpcn_page.cpp
 int world_levels(const std::vector<std::string> &argv);       // tools/fixes/world-levels/world_levels.cpp
 int netgame_order(const std::vector<std::string> &argv);      // tools/fixes/netgame-order/netgame_order.cpp
-int emblem_cap3(const std::vector<std::string> &argv);        // tools/fixes/wall-emblem-test/emblem_cap3.cpp
 int eula_box(const std::vector<std::string> &argv);           // tools/fixes/dctools/eula_box.cpp
 int enemy_stall(const std::vector<std::string> &argv);        // tools/fixes/enemy-stall/apply_ss_option_defaults.cpp
 int coop_desc(const std::vector<std::string> &argv);          // tools/fixes/coop-chars/apply_coop_desc_fix.cpp
@@ -76,8 +75,6 @@ int facility_collapse(const std::vector<std::string> &argv);   // tools/fixes/in
 std::string find_ffmpeg(const std::string &arg);         // --ffmpeg, RECIPE_FFMPEG, msys2, PATH (sound-banks/convert_banks.cpp)
 Bytes sound_bank_convert(const Bytes &ps3, const std::string &ffmpeg, const fs::path &adsr_env, std::string &note);   // one bank (the U2 import)
 int eula_pages(const std::vector<std::string> &argv);          // tools/fixes/eula-batch/make_eula.cpp
-int wall_emblem(const std::vector<std::string> &argv);           // tools/fixes/wall-emblem/make_emblem.cpp
-int wall_emblem_actors(const std::vector<std::string> &argv);    // tools/fixes/wall-emblem/make_emblem.cpp
 int outdoor_jacket(const std::vector<std::string> &argv);        // tools/fixes/outdoor-jacket/apply_outdoor_jacket.cpp
 int lab_registration(const std::vector<std::string> &argv);      // tools/fixes/dctools/lab_reg.cpp
 bool net_is_ps3_order(const Dc &net, const std::string &net18);   // dctools/net_edits.cpp: netgame table in PS3 1.19 order

@@ -12,6 +12,7 @@
 //  * spec mask scale: the mean of the mask channel the program reads from the material's '-spec' texture.
 #pragma once
 #include "ps3bg.hpp"
+#include <set>
 
 namespace u3::fp {
 
@@ -43,5 +44,7 @@ std::optional<double> mask_scale(Ps3Programs &P, const std::string &name);
 
 // the texture reads of the main-pass program with UV set 2 (f[TEX0].zw), where the U3 overlay layers are laid out
 int uv_set2_reads(Ps3Programs &P, const std::string &name);
+// the texture coordinates of each texture read of the main-pass program (full name -> {"TEX0.xy", "TEX0.zw", ..., "reg"})
+std::map<std::string, std::set<std::string>> texture_coords(Ps3Programs &P, const std::string &name);
 
 }  // namespace u3::fp
