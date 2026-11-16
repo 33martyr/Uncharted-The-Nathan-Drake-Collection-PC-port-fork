@@ -8,7 +8,7 @@
   </a>
 </p>
 
-A free, non-commercial fan project that runs the PS4 *Uncharted: The Nathan Drake Collection* natively on Windows, using your own copy. Includes *Drake's Fortune*, *Among Thieves* and *Drake's Deception* (CUSA02344), plus an experimental **Uncharted 3 multiplayer restoration**.
+A free, non-commercial fan project that runs the PS4 *Uncharted: The Nathan Drake Collection* natively on Windows, using your own copy. Includes *Drake's Fortune*, *Among Thieves* and *Drake's Deception* (CUSA02344), plus an experimental **Uncharted 2 and Uncharted 3 multiplayer restoration**.
 
 The games' x86-64 code runs directly on your PC, with a runtime for PS4 system libraries and a Vulkan renderer. This fork adds a C++ launcher based on the original launcher.
 
