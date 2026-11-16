@@ -23,8 +23,6 @@ skins-net-names
 maps-batch-dc
 eula-menu-box
 skin-textures
-wall-emblem
-wall-emblem-actors
 borneo-water-jitter
 map-colors-lightmap
 borneo-grass-leaf
@@ -37,7 +35,6 @@ hat-colour
 outdoor-jacket
 airport-igc2
 enemy-stall-option-defaults
-emblem-cap3
 coop-audit-option-defaults
 shade-npc-paks
 coop-voice-all
