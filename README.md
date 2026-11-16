@@ -1,6 +1,10 @@
 # Uncharted: The Nathan Drake Collection — Unofficial PC port
 
-[![Get it on RecompLauncher](https://recomplauncher.com/assets/press/launcher/badge-dark.svg)](https://recomplauncher.com/game/uncharted-the-nathan-drake-collection-pc-port-2)
+<p align="center">
+  <a href="https://recomplauncher.com/game/uncharted-the-nathan-drake-collection-pc-port-2">
+    <img src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" alt="Get it on RecompLauncher">
+  </a>
+</p>
 
 A free, non-commercial fan project that runs the PS4 *Uncharted: The Nathan Drake Collection*
 (CUSA02344: *Drake's Fortune*, *Among Thieves* and *Drake's Deception*) natively on Windows, from
