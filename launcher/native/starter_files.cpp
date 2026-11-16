@@ -1,7 +1,6 @@
 // starter_files.cpp - file chores of the game starter (formerly in tools/probe_uncharted.py), built into
 // uncharted_native.dll: putting the runtime in place under the name Uncharted.exe, setting up the user folder of an
-// extra instance, copying the update's files for drives that can't hold links, making the game window's icon, and
-// building the combined game-plus-update view.
+// extra instance, copying the update's boot files, and making the game window's icon.
 
 #include "native.h"
 #include "json.h"
@@ -183,10 +182,10 @@ std::string sfo_text(const std::wstring &folder, const char *key) {
     return f->kind == Value::String ? f->s : f->kind == Value::Int ? std::to_string(f->i) : "";
 }
 
-// Used when the game's drive can't hold links (exFAT, FAT32). The preparation only reads the executables, sce_module
-// and sce_sys, so just those are copied into analysis\views, with the update's version of a file taking priority over
-// the game's. That is roughly 90 MB, and a file is copied again only after its source changes. Everything else the runtime
-// reads from the game with the update laid on top by itself (--app0-overlay).
+// The preparation only reads the executables, sce_module and sce_sys, so just those are copied into analysis\views,
+// with the update's version of a file taking priority over the game's. That is roughly 90 MB, and a file is copied
+// again only after its source changes. Everything else the runtime reads from the game with the base and update laid
+// on top by itself (--app0-overlay).
 std::string boot_view(const std::wstring &root, const std::wstring &base, const std::wstring &update) {
     std::map<std::wstring, std::pair<std::wstring, std::wstring>> chosen;   // lower-case path -> (path, source)
     std::vector<std::wstring> order;
@@ -448,226 +447,6 @@ std::string window_icon(const std::wstring &root, const std::wstring &game) {
     return utf8(icon) + "\n";
 }
 
-// ------------------------------------------------------------------------------------------------ the update view
-// (replaces gow3_pc/scripts/game_update.py) When a dumped game and its update sit in separate folders, the starter
-// builds a temporary folder made of links that shows the game with the update on top. Neither dump is written to, and
-// even a 47 GB game needs only a few links. A file is hard-linked when possible (works on the same drive, needs no
-// special privilege, and its size reads correctly through every API); otherwise a symbolic link is tried, and as a
-// last resort a folder becomes a junction and a file a copy. File names are compared case-insensitively.
-
-struct ValueError { std::string message; };
-
-// Formats a failed link the way Python reports it: "[WinError n] text: 'source' -> 'link'".
-std::string os_error2(const std::wstring &source, const std::wstring &link, DWORD code = GetLastError()) {
-    std::string shown;
-    for (char c : utf8(link)) shown += c == '\\' ? std::string("\\\\") : std::string(1, c);
-    return os_error(source, code) + " -> '" + shown + "'";
-}
-
-// Same, for an error that names no file: "[WinError n] text".
-std::string win_error(DWORD code = GetLastError()) {
-    const std::string full = os_error(L"", code);
-    return full.substr(0, full.size() - 4);   // cut off the trailing ": ''"
-}
-
-bool is_reparse(const std::wstring &p) {
-    const DWORD a = GetFileAttributesW(p.c_str());
-    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT);
-}
-bool exists(const std::wstring &p) {   // true only if a link's target is reachable too (like Path.exists)
-    WIN32_FILE_ATTRIBUTE_DATA a;
-    if (!attributes(p, a)) return false;
-    if (!(a.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
-    HANDLE h = CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
-    CloseHandle(h);
-    return true;
-}
-bool is_dir_followed(const std::wstring &p) { return exists(p) && is_dir(p); }
-bool is_file_followed(const std::wstring &p) { return exists(p) && is_file(p); }
-
-// The real location behind a path, with links followed and any \\?\ prefix removed (what Path.resolve() gives); the
-// plain absolute path when that can't be determined.
-std::wstring resolved(const std::wstring &p) {
-    std::vector<wchar_t> full(32768);
-    DWORD n = GetFullPathNameW(p.c_str(), 32768, full.data(), nullptr);
-    std::wstring f = n && n < 32768 ? std::wstring(full.data(), n) : p;
-    HANDLE h = CreateFileW(f.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                           FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return f;
-    n = GetFinalPathNameByHandleW(h, full.data(), 32768, FILE_NAME_NORMALIZED);
-    CloseHandle(h);
-    if (!n || n >= 32768) return f;
-    std::wstring r(full.data(), n);
-    if (r.compare(0, 8, L"\\\\?\\UNC\\") == 0) return L"\\" + r.substr(7);
-    if (r.compare(0, 4, L"\\\\?\\") == 0) return r.substr(4);
-    return r;
-}
-
-std::wstring fold(const std::wstring &s) {   // lower case for comparing names (enough of str.casefold for game files)
-    std::wstring o(s);
-    if (!o.empty())
-        LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.c_str(), (int)s.size(), &o[0], (int)o.size(), nullptr, nullptr, 0);
-    return o;
-}
-
-// Names inside a folder, in whatever order the file system returns them (as os.scandir), skipping . and ..
-std::vector<std::wstring> entries_of(const std::wstring &folder) {
-    std::vector<std::wstring> names;
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(join(folder, L"*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) throw Failure{os_error(folder)};
-    do {
-        const std::wstring n = fd.cFileName;
-        if (n != L"." && n != L"..") names.push_back(n);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return names;
-}
-
-// Creates a junction, the kind of folder link any user may make, with the same reparse data _winapi.CreateJunction
-// writes.
-bool create_junction(const std::wstring &target, const std::wstring &link) {
-    const std::wstring substitute = L"\\??\\" + target;
-    const size_t sub = substitute.size() * 2, print = target.size() * 2;
-    std::vector<char> buf(16 + sub + 2 + print + 2, 0);
-    auto put16 = [&](size_t at, size_t v) { buf[at] = (char)v; buf[at + 1] = (char)(v >> 8); };
-    const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
-    std::memcpy(&buf[0], &tag, 4);
-    put16(4, buf.size() - 8);   // length of everything after the 8-byte header
-    put16(8, 0);                // substitute name: offset, then length
-    put16(10, sub);
-    put16(12, sub + 2);         // print name: offset, then length
-    put16(14, print);
-    std::memcpy(&buf[16], substitute.data(), sub);
-    std::memcpy(&buf[16 + sub + 2], target.data(), print);
-    if (!CreateDirectoryW(link.c_str(), nullptr)) return false;
-    HANDLE h = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-                           FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    DWORD got = 0;
-    const bool ok = h != INVALID_HANDLE_VALUE &&
-                    DeviceIoControl(h, FSCTL_SET_REPARSE_POINT, buf.data(), (DWORD)buf.size(), nullptr, 0, &got, nullptr);
-    const DWORD error = GetLastError();
-    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-    if (!ok) {
-        RemoveDirectoryW(link.c_str());
-        SetLastError(error);
-    }
-    return ok;
-}
-
-// Makes `link` point at `target`, trying in turn: a hard link (files only), a symbolic link, then a junction for a
-// folder or a plain copy for a file. (Native version of mods.make_link.)
-void make_link(const std::wstring &link, const std::wstring &target) {
-    const bool file = is_file_followed(target), dir = is_dir_followed(target);
-    if (file && CreateHardLinkW(link.c_str(), target.c_str(), nullptr)) return;
-    // tests set UNCHARTED_TEST_NO_SYMLINKS=1 to behave like a PC where symbolic links are not allowed
-    if (env(L"UNCHARTED_TEST_NO_SYMLINKS") != L"1" && CreateSymbolicLinkW(link.c_str(), target.c_str(),
-                            (dir ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0) | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))
-        return;
-    if (dir) {
-        if (!create_junction(target, link)) throw Failure{win_error()};
-        return;
-    }
-    if (CreateHardLinkW(link.c_str(), target.c_str(), nullptr)) return;
-    if (!CopyFileW(target.c_str(), link.c_str(), FALSE)) throw Failure{os_error2(target, link)};
-}
-
-// Deletes one entry of a view (file, link or folder). Links are removed themselves; what they point to inside the
-// dumps is never entered or touched. (Was game_update.remove.)
-void remove_path(const std::wstring &path) {
-    const DWORD a = GetFileAttributesW(path.c_str());
-    if (a == INVALID_FILE_ATTRIBUTES) throw Failure{os_error(path)};
-    if (a & FILE_ATTRIBUTE_DIRECTORY) {
-        if (!(a & FILE_ATTRIBUTE_REPARSE_POINT))   // not a link but an actual folder: empty it before removing it
-            for (const std::wstring &child : entries_of(path)) remove_path(join(path, child));
-        if (!RemoveDirectoryW(path.c_str())) throw Failure{os_error(path)};
-    } else if (!DeleteFileW(path.c_str())) {
-        throw Failure{os_error(path)};
-    }
-}
-
-// Puts the contents of `source` on top of `dest`, whose entries are links into the base game. A file from source
-// takes the place of dest's entry with the same name (compared case-insensitively); a folder present on both sides
-// is turned into a real folder and merged recursively. (Was game_update.overlay.)
-void overlay(const std::wstring &source, const std::wstring &dest) {
-    std::map<std::wstring, std::wstring> names;   // lower-cased name -> how dest spells it; a later duplicate wins
-    for (const std::wstring &n : entries_of(dest)) names[fold(n)] = n;
-    for (const std::wstring &n : entries_of(source)) {
-        const std::wstring item = join(source, n);
-        auto it = names.find(fold(n));
-        const std::wstring match = join(dest, it != names.end() ? it->second : n);
-        if (is_dir_followed(item) && is_dir_followed(match)) {
-            if (is_reparse(match)) {   // dest only links to the base's folder: replace the link with a folder of links
-                const std::wstring inner = resolved(match);
-                remove_path(match);
-                if (!CreateDirectoryW(match.c_str(), nullptr)) throw Failure{os_error(match)};
-                for (const std::wstring &child : entries_of(inner)) make_link(join(match, child), join(inner, child));
-            }
-            overlay(item, match);
-        } else {
-            if (GetFileAttributesW(match.c_str()) != INVALID_FILE_ATTRIBUTES) remove_path(match);
-            make_link(match, item);
-        }
-    }
-}
-
-bool below(const std::wstring &child, const std::wstring &parent) {   // child lies somewhere inside parent (any case)
-    std::wstring c = fold(child), p = fold(parent);
-    while (!p.empty() && (p.back() == L'\\' || p.back() == L'/')) p.pop_back();
-    return c.size() > p.size() + 1 && c.compare(0, p.size(), p) == 0 && (c[p.size()] == L'\\' || c[p.size()] == L'/');
-}
-
-// Creates a fresh folder in `dir` named `prefix` plus 8 random characters (the same naming as tempfile.mkdtemp).
-std::wstring make_temp_dir(const std::wstring &dir, const std::wstring &prefix) {
-    static const wchar_t *chars = L"abcdefghijklmnopqrstuvwxyz0123456789_";
-    std::vector<wchar_t> full(32768);
-    DWORD n = GetFullPathNameW(dir.c_str(), 32768, full.data(), nullptr);
-    const std::wstring base = n && n < 32768 ? std::wstring(full.data(), n) : dir;
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        unsigned char r[8];
-        BCryptGenRandom(nullptr, r, sizeof r, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-        std::wstring name = prefix;
-        for (unsigned char c : r) name += chars[c % 37];
-        const std::wstring path = join(base, name);
-        if (CreateDirectoryW(path.c_str(), nullptr)) return path;
-        if (GetLastError() != ERROR_ALREADY_EXISTS) throw Failure{os_error(path)};
-    }
-    throw Failure{"No usable temporary directory name found"};
-}
-
-// Builds, inside `out`, a new folder showing the base game with the update over it, and returns its path. The caller
-// deletes it again through remove_view. (Was game_update.create_view.)
-std::string game_view(const std::wstring &base_in, const std::wstring &update_in, const std::wstring &out) {
-    const std::wstring base = resolved(base_in), update = resolved(update_in);
-    const std::string base_id = sfo_text(base, "TITLE_ID"), update_id = sfo_text(update, "TITLE_ID");
-    if (base_id.empty() || base_id != update_id)
-        throw ValueError{"The game and the update belong to different titles: " +
-                         (base_id.empty() ? std::string("None") : base_id) + " / " +
-                         (update_id.empty() ? std::string("None") : update_id)};
-    if (fold(base) == fold(update) || below(base, update) || below(update, base))
-        throw ValueError{"The game and its update have to be in two different folders, neither inside the other"};
-    if (!is_file_followed(join(update, L"eboot.bin")))
-        throw ValueError{"An update folder must contain eboot.bin and sce_sys/param.sfo"};
-    if (!make_dirs(out)) throw Failure{os_error(out)};
-    const std::wstring target = make_temp_dir(out, L"game-update-");
-    try {
-        // Link the folders before the files: on a drive that can't hold links (exFAT, FAT32) the very first folder
-        // fails, so no time is spent copying files first.
-        std::vector<std::wstring> names = entries_of(base);
-        std::vector<std::wstring> folders, files;
-        for (const std::wstring &n : names) (is_dir_followed(join(base, n)) ? folders : files).push_back(n);
-        folders.insert(folders.end(), files.begin(), files.end());
-        for (const std::wstring &n : folders) make_link(join(target, n), join(base, n));
-        overlay(update, target);
-    } catch (...) {
-        try { remove_path(target); } catch (...) {}
-        throw;
-    }
-    return utf8(target);
-}
-
 std::wstring arg_at(const Value &args, size_t i) {
     return i < args.items.size() && args.items[i].kind == Value::String ? widen(args.items[i].s) : L"";
 }
@@ -680,11 +459,8 @@ extern "C" {
 //   game_executable [root]               -> the program's path, then a message line
 //   user_dir [root, suffix]              -> the folder, then a message line
 //   boot_view [root, game, update]       -> the folder holding the copies
-//   game_view [game, update, out]        -> the folder of the combined view
-//   remove_view [view]                   -> nothing
 //   window_icon [root, game]             -> the icon's path, then a message line
-// Returns 0 on success; 1 on a file error (`out` has it in Python's OSError wording); 2 for an unknown `what`; 3 when
-// the game and update folders can't be combined (`out` says why).
+// Returns 0 on success; 1 on a file error (`out` has it in Python's OSError wording); 2 for an unknown `what`.
 UN_API int un_starter_files(const char *what, const char *args_json, char *out, int cap) {
     std::string w = what ? what : "";
     Value args;
@@ -693,16 +469,7 @@ UN_API int un_starter_files(const char *what, const char *args_json, char *out, 
         if (w == "game_executable") return give(game_executable(arg_at(args, 0)), out, cap);
         if (w == "user_dir") return give(user_dir(arg_at(args, 0), utf8(arg_at(args, 1))), out, cap);
         if (w == "boot_view") return give(boot_view(arg_at(args, 0), arg_at(args, 1), arg_at(args, 2)), out, cap);
-        if (w == "game_view") return give(game_view(arg_at(args, 0), arg_at(args, 1), arg_at(args, 2)), out, cap);
-        if (w == "remove_view") {
-            const std::wstring view = arg_at(args, 0);
-            if (exists(view)) remove_path(view);
-            return give("", out, cap);
-        }
         if (w == "window_icon") return give(window_icon(arg_at(args, 0), arg_at(args, 1)), out, cap);
-    } catch (const ValueError &e) {
-        int status = give(e.message, out, cap);
-        return status < 0 ? status : 3;
     } catch (const Failure &f) {
         int status = give(f.message, out, cap);
         return status < 0 ? status : 1;

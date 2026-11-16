@@ -117,7 +117,7 @@ of the call at `0x3fc52d` (this module's stub) and chains it. This module must t
 | page vtable +0x10 | page update | `(u8 *page, u8 *update_args)` |
 | page vtable +0x18 | page item render | `(u8 *page, NULL, u8 *page_desc)` |
 | list vtable +0x00 / +0x30 / +0x38 | team list getters: current / first / last row | `(u8 *list)` -> s32 |
-| `0x5b4e90` | menu slot quad draw | `(CTX, NULL, u8 *quad, int slot)`, slot 8 (gallery picture) or 10 (no material: solid colour) |
+| `0x5b4e90` | menu slot quad draw | `(CTX, NULL, int slot, u8 *quad)`, slot 8 (gallery picture) or 10 (no material: solid colour) |
 | `0xbdce90` | material quad draw | `(u8 *ctx48, u64 *info4, u8 *quad)` |
 | `0xcc9a70` | text printer | `(u8 *text_struct, const char *text)` |
 | `0xcc7cc0` | default glyph draw | `(printer_state, u8 *glyph_struct)` -> f32 advance |
@@ -488,7 +488,7 @@ For each card i from 0 while i < count and i < 16, in order:
    - Type 0: if the material is NULL, nothing. Otherwise guest call `0xbdce90(ctx48, info, quad)`
      with the second colour left 0.
    - Type 1 or 2: second colour (1, 1, 1, 1) on all vertices, guest call
-     `0x5b4e90(CTX, NULL, quad, 8)` for type 1 or `(…, 10)` for type 2.
+     `0x5b4e90(CTX, NULL, 8, quad)` for type 1 or `(…, 10, quad)` for type 2.
 8. After the card's cells: if the card log budget is > 0 and the type is not 2, decrement the budget
    and log `loading screen: card type %d material %p %.0fx%.0f at %.0f,%.0f, %dx%d cells, gallery state %d loaded %d`
    with type, material pointer, w, h, card x, card y (as doubles), n, n, s32 at `M + 0x120`, u8 at

@@ -118,10 +118,10 @@ void runtime_file_configure(const char *app0,const char *user) {
 }
 /* Update layers over /app0 and /hostapp (--app0-overlay, the first added wins). A game update
  * (1.02) holds only the files it changes: those are read from the update and everything else
- * from the game, as the PS4 mounts a patch over the disc. The probe uses this where the two
- * can't be combined as a folder of links (exFAT and FAT32 drives). Each layer is indexed once
- * at start, names without case, so a lookup costs no system call; the index never changes. */
-#define MAX_OVERLAYS 4
+ * from the game, as the PS4 mounts a patch over the disc. The launcher uses this instead of
+ * building a link view of the whole game. Each layer is indexed once at start, names without
+ * case, so a lookup costs no system call; the index never changes. */
+#define MAX_OVERLAYS 8
 typedef struct { char *key, *rel; int dir; } OverlayEntry;
 typedef struct { char root[512]; OverlayEntry *entries; size_t count, capacity, files, dirs; } Overlay;
 static Overlay overlays[MAX_OVERLAYS];

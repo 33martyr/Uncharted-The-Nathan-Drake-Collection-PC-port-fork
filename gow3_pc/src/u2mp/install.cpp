@@ -172,6 +172,7 @@ extern "C" int u2mp_install(unsigned char *base, uint64_t size, const uint64_t *
     install_hud(installed);
     install_scoreboard(installed);   // after install_loading: chains its 2D draw call
     install_rosternames(installed);  // team list rows: display name from the nick
+    install_solocoop(installed);
     install_matchend(installed);     // after install_frontend: wraps session.cpp's Playing slot
     install_visibility(installed);   // per-frame call comes from matchend
     install_netanim(installed);

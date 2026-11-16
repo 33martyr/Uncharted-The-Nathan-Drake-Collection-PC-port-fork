@@ -3,8 +3,8 @@
 // tools/probe_uncharted.py (--boot --seconds 0 --executable <exe> --game <folder>).
 //
 // Order of work, all in native code:
-//   1. Look for an update beside the game and merge it in, as a folder of links or, failing that, as copies of just
-//      the files the preparation needs.
+//   1. Look for an update beside the game and copy just the files the preparation needs; the runtime overlays the
+//      base and update over the game folder.
 //   2. Prepare the image (prepare.cpp writes boot.bin, link.cpp writes boot-linked.bin, plus the content profile).
 //   3. Swap in the Uncharted 3 multiplayer image if one is set up, otherwise apply the code patches.
 //   4. Patch the render size, compute the runtime environment, pick the window icon.
@@ -155,11 +155,6 @@ std::wstring name_of(const std::wstring &p) {
     size_t cut = s.find_last_of(L"\\:");
     return cut == std::wstring::npos ? s : s.substr(cut + 1);
 }
-std::wstring anchor(const std::wstring &p) {   // drive part plus root, e.g. "D:\" (Python's Path.anchor)
-    const std::wstring s = path_str(p);
-    if (s.size() >= 2 && s[1] == L':') return s.substr(0, 2) + (s.size() > 2 && s[2] == L'\\' ? L"\\" : L"");
-    return L"";
-}
 // Like Python's Path.resolve(): absolute path with links followed; if the target can't be opened, just the
 // absolute path.
 std::wstring resolved(const std::wstring &p) {
@@ -226,8 +221,8 @@ std::string system_text(const char *what, const std::wstring &arg, bool &found) 
     return found ? text : "";
 }
 
-// Runs one of starter_files.cpp's file operations. They copy or link files, so each is called exactly once with a
-// generous buffer instead of call_grow. Status 0 = success, 1 = file system error, 3 = bad input (game_view only).
+// Runs one of starter_files.cpp's file operations. They copy files, so each is called exactly once with a generous
+// buffer instead of call_grow. Status 0 = success, 1 = file system error.
 int starter_files(const char *what, const std::vector<std::wstring> &args, std::string &text) {
     Value list;
     list.kind = Value::Array;
@@ -899,51 +894,15 @@ Result run_once(const Args &args, const std::string &executable, const std::vect
     if (!update_version.empty() && update_version < "01.02")
         print("The update folder's executables are version " + update_version + " even though its param.sfo says "
               "otherwise, so the fixes made for 1.02 are left out. Unpack update 1.02 once more.");
-    // Build a merged view of game plus update out of file links (starter_files.cpp game_view). It is placed on the
-    // same drive as the game if possible, because links cannot point across drives (elsewhere it falls back to
-    // copies).
-    std::wstring view;
-    std::string not_combined;
-    if (env(L"UNCHARTED_TEST_OVERLAY") == L"1") {   // testing aid: force the path used on drives without links
-        not_combined = "UNCHARTED_TEST_OVERLAY=1";
-    } else {
-        std::vector<std::wstring> places = {join(g_root, L"analysis\\views")};
-        if (lower(resolved(anchor(base))) != lower(resolved(anchor(g_root))))
-            places.insert(places.begin(), join(parent(parent(base)), L".uncharted-views"));
-        for (auto &place : places) {
-            std::string text;
-            const int status = starter_files("game_view", {base, update, place}, text);
-            if (status == 0) { view = path_str(widen(text)); break; }
-            if (status == 3) throw Stop{"ValueError: " + text};
-            print("Making the game view in " + utf8(place) + " failed: " + text);
-        }
-        if (view.empty()) not_combined = "The game and its update could not be joined";
+    // Preparation reads only the executables, sce_module and sce_sys, so copy those and let the runtime lay the base
+    // and update over the copy. This avoids building a hard-link view of the whole game, which is very slow on some
+    // external drives.
+    std::string text;
+    if (starter_files("boot_view", {g_root, base, update}, text) == 1) {
+        print("Copying the update files failed (" + text + "): the game starts without its update");
+        return run_game(args, base, executable, guest_args, loadexec);
     }
-    if (view.empty()) {
-        // Drives formatted exFAT or FAT32 (typically USB sticks) cannot store links. In that case the runtime itself
-        // overlays the update on the game, and preparation works from copies of the handful of files it reads.
-        print(not_combined + ": the drive holds no links, so the runtime overlays the update on the game itself");
-        std::string text;
-        if (starter_files("boot_view", {g_root, base, update}, text) == 1) {
-            print("Copying the update files failed (" + text + "): the game starts without its update");
-            return run_game(args, base, executable, guest_args, loadexec);
-        }
-        return run_game(args, path_str(widen(text)), executable, guest_args, loadexec, base, {update});
-    }
-    try {
-        Result r = run_game(args, view, executable, guest_args, loadexec);
-        std::string text;
-        if (starter_files("remove_view", {view}, text) == 1)
-            print("Game view " + utf8(view) + " could not be deleted: " + text);
-        return r;
-    } catch (...) {
-        std::string text;
-        try {
-            if (starter_files("remove_view", {view}, text) == 1)
-                print("Game view " + utf8(view) + " could not be deleted: " + text);
-        } catch (...) {}
-        throw;
-    }
+    return run_game(args, path_str(widen(text)), executable, guest_args, loadexec, base, {update});
 }
 
 const char *USAGE = "usage: probe_uncharted.py [-h] [--game GAME] [--boot]\n"

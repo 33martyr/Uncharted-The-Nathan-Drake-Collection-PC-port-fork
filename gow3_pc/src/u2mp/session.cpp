@@ -243,6 +243,7 @@ void add_tracker(uint32_t net_id, const std::string &name, bool local) {
     guest<void(U2MP_GUEST *)(void *)>(kClearTracker)(t);
     const std::string shown = name.empty() ? std::string("Player") : cut(name, 63);
     std::memcpy(t + 0x20, shown.c_str(), shown.size() + 1);
+    std::memcpy(t + 0xa0, shown.c_str(), shown.size() + 1);  // message-list name
     put<uint32_t>(t + 0x120, net_id);
     put<uint32_t>(t + 0x238, 0);
     put<int32_t>(t + 0x23c, local ? -1 : int32_t(net_id));
@@ -958,6 +959,8 @@ void log_wait_list(int list, bool skip_flagged) {
     }
 }
 
+bool level_loader_busy = false;
+
 void load_levels_diagnostics(uint8_t *state) {
     leave_reason("load levels");
     uint32_t task_level = 0;
@@ -966,6 +969,7 @@ void load_levels_diagnostics(uint8_t *state) {
             if (uint8_t *b = ptr_at(a + 0x88)) task_level = get<uint32_t>(b + 0x28);
     bool packages = guest<bool(U2MP_GUEST *)(void *)>(kPackagesLoaded)(g(kPackageTable));
     bool busy = guest<bool(U2MP_GUEST *)()>(kLoaderBusy)();
+    level_loader_busy = busy;
     uint32_t second = 0;
     Table games = table_of(lookup(kNetGamesId));
     int16_t game = current_game();
@@ -995,6 +999,7 @@ void missing_level_package() {
     static std::chrono::steady_clock::time_point waited_since;
     static bool file_present = false;
     static uint32_t last_told = 0;   // the id of the last 20 s log (0 none)
+    static uint32_t requested_id = 0;
 
     Table games = table_of(lookup(kNetGamesId));
     Table levels = table_of(lookup(kLevelsId));
@@ -1020,6 +1025,7 @@ void missing_level_package() {
     if (id != waited_id) {
         waited_id = id;
         waited_since = now;
+        requested_id = 0;
         std::string guest_path = std::string("/app0/u2data/build/main/pak22/ps4/") + name + "-ingame10.pak";
         char host[1024];
         file_present = false;
@@ -1031,6 +1037,14 @@ void missing_level_package() {
         }
     }
     if (file_present) {
+        if (level_loader_busy) {
+            if (requested_id != id) {
+                requested_id = id;
+                log("load levels: requesting %s while the loader is busy", name);
+                request_package(name);
+            }
+            return;
+        }
         if (now - waited_since < std::chrono::seconds(20)) return;
         if (id != last_told) {
             last_told = id;

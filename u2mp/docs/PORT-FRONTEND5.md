@@ -211,7 +211,7 @@ extreme offsets (left edge at x = -18 with offset 250, zoom 1.25); without it, b
 
 | PS3 | PS4 | how |
 |---|---|---|
-| `0x414ad8(ctx, quad, slot)` | `0x5b4e90(ctx, list, quad, slot)` | same body: slot 10 -> no material; slot 8 needs `ctx+0x128` and `ctx+0x110 == 3`, then {material, `ctx+0x118`, ...}; renderer case 0x1b calls it with slot 10 (`0x5c0d6e`) |
+| `0x414ad8(ctx, slot, quad)` | `0x5b4e90(ctx, list, slot, quad)` | same body: slot 10 -> no material; slot 8 needs `ctx+0x128` and `ctx+0x110 == 3`, then {material, `ctx+0x118`, ...}; renderer case 0x1b calls it with slot 10 (`0x5c0d6e`) |
 | `0x8b16f0` + `0x8b1598` | `0xbdce90(ctx, {material, 0, 0, 0}, quad)` | as menuimages.cpp |
 | `0x414968(ctx, path)` gallery request | inlined `0x58b5c8`: slot = ctx - 0x10 (the menu manager): +0x368 = 10 (keep-alive frames), path `"%s/build/main/gallery1/%s"` (`0xe87590`, root `[0x104ad28]+0x408`) to +0x268, +0x367 = 0, +0x120 = 1 if 0 | the menu update `0x5b46dc..0x5b488a` sees these at ctx +0x358, +0x258, +0x257, +0x110 and loads into ctx+0x118 (state 3) |
 | materials `0x8a015c(id)` | `menu_net_material(id)` | PS4 net.pak `general/net/loading-screen:money / coins`, `player-photos:*`, `map-photos:*` (net-u2mp for missing ones) |
