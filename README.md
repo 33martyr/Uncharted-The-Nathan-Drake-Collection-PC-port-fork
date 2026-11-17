@@ -85,13 +85,14 @@ Comment on an issue and wait for a reply before starting. Submit one small fix p
 
 ## Credits and license
 
-- **BilalReloaded** ([YouTube](https://www.youtube.com/@BilalReloaded/videos), [GitHub](https://github.com/bc160201983)): Created the [original PC port](https://github.com/bc160201983/Uncharted-The-Nathan-Drake-Collection-PC-port), runtime, game fixes and launcher. This fork's launcher converts his Python launcher to C++. Without his port, this project would not exist.
+- [**BilalReloaded**](https://github.com/bc160201983)): Created the [original PC port](https://github.com/bc160201983/Uncharted-The-Nathan-Drake-Collection-PC-port), runtime, game fixes and launcher. This fork's launcher converts his Python launcher to C++. Without his port, this project would not exist.
 - **Runtime:** Based on [gow3_pc](https://github.com/FelipePrado0/gow3_pc), retaining its `GOW3_*` names, and the [shadPS4](https://github.com/shadps4-emu/shadPS4) video core.
 - **Temporal anti-aliasing:** Uses the games' motion-blur velocity pass for the camera, following [SuperMedo's Uncharted port](https://github.com/Supermedo/uncharted_pc) (GPL v2).
 - **NVIDIA DLSS / DLAA:** NVIDIA DLSS SDK **310.9.16** (`nvngx_dlss.dll`, NVIDIA license in `licenses/nvidia-dlss`), with a bridge adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) (MIT). NVIDIA, RTX and DLSS are NVIDIA Corporation trademarks.
 - **Third-party libraries:** FSR (AMD), imgui, magic_enum, miniz, xbyak, LibAtrac9, FFmpeg, SDL3, [Qt 6](https://www.qt.io) (LGPL v3, unmodified shared libraries), [Python](https://www.python.org) (PSF), [Pillow](https://python-pillow.org) (HPND), [NumPy](https://numpy.org) (BSD) and [Opus](https://opus-codec.org) (BSD).
-- **João Fidalgo:** Uncharted 3 multiplayer restoration and pak tools (`u3mp/`). TLS uses [BearSSL](https://bearssl.org) (MIT).
-- **33martyr:** Map and character visual fixes, including Yeti mask, Outdoor Jacket and map lighting.
+- [**João Fidalgo**](https://github.com/fidalgojoao): Entire planning and rework of all the launcher, Uncharted 2 multiplayer and Uncharted 3 multiplayer restoration and pak tools (`u3mp/`). TLS uses [BearSSL](https://bearssl.org) (MIT).
+- [**Tha14**](https://github.com/Tha14): Huge contributions to the launcher, Uncharted 3 Multiplayer and Uncharted 2 Multiplayer.
+- [**33martyr**](https://github.com/33martyr): Uncharted 3 Multiplayer Map and character visual fixes, including Yeti mask, Outdoor Jacket and map lighting.
 - **RPCS3 and RPCN:** Online play uses [RPCS3's](https://rpcs3.net) RPCN service and communicates as RPCS3 does. RPCN is by **RipleyTom** and contributors ([source](https://github.com/RipleyTom/rpcn)); RPCS3 is by its team and contributors ([source](https://github.com/RPCS3/rpcs3)). Thank you to both. This project is independent and not endorsed by either; report this project's issues here.
 
 **Fork license:** Created on **5 November 2026** from original commit `e0c99f9` (*Release 0.8.3*), published under **GNU GPL v2 or later** ([license](gow3_pc/LICENSE)). This fork follows those terms: copying, modifying and redistributing requires keeping the license and making the source available. Later license changes to the original do not apply to this copy, as the source code has already been fully rewritten. See the [GNU GPL v2 or later license](gow3_pc/LICENSE).
