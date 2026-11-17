@@ -100,6 +100,4 @@ Windows packages include `LICENSE.txt` and bundled library licenses. `licenses/T
 
 ### Reusing this work
 
-You may use these fixes in your own port. Keep copyright and license notices, and publish your source under the same license when distributing a build.
-
-Please also credit and link to [this project](https://github.com/fidalgojoao/Uncharted-The-Nathan-Drake-Collection-PC-port) in your README or release notes so people can trace each fix.
+You may use these fixes in your own port. Keep copyright and license notices, and publish your source under the same license when distributing a build. Please also credit and link to [this project](https://github.com/fidalgojoao/Uncharted-The-Nathan-Drake-Collection-PC-port) in your README or release notes so people can trace each fix.
