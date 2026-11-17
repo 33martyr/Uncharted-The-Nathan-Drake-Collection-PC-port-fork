@@ -65,7 +65,7 @@ Press **IMPORT** and follow the progress log. Conversion takes hours and resumes
 - **Restoration code:** Multiplayer code was written from scratch to reproduce PS3 behaviour. Apart from short instruction patterns used to locate and verify patches, it contains no code from either game.
 - **No bundled game keys or secrets:** Online-profile values are read locally from your own decrypted PS3 executable and placed only in your locally built game image. They never leave your PC.
 - **Online service:** Community RPCN servers, with no connection to PlayStation Network, which no longer hosts these games' multiplayer.
-- **No affiliation:** Not approved, endorsed or supported by Sony Interactive Entertainment, Naughty Dog, Bluepoint Games or their affiliates. *Uncharted* belongs to Sony Interactive Entertainment LLC; PlayStation, PS3, PS4 and PlayStation logos are trademarks of Sony Interactive Entertainment Inc. Game content and other trademarks belong to their owners and are used only for identification.
+- **No affiliation:** Not endorsed or supported by Sony Interactive Entertainment, Naughty Dog, Bluepoint Games or their affiliates. *Uncharted* belongs to Sony Interactive Entertainment LLC; PlayStation, PS3, PS4 and PlayStation logos are trademarks of Sony Interactive Entertainment Inc. Game content and other trademarks belong to their owners and are used only for identification.
 - **Free and open source:** No donations, sales or ads. GPL v2 or later source is included for everything covered by that license. Provided “as is”, without warranty. See the license details below for separate packaged components.
 - **Rights holders:** [Open an issue](../../issues) with any concern; it will be reviewed promptly.
 
