@@ -18,7 +18,7 @@ The games' x86-64 code runs directly on your PC, with a runtime for PS4 system l
 
 All three games play, with working menus, game switching, saves, audio, cutscenes and controllers. Uncharted 2 and 3 have been played at up to 4K and above 60 FPS on fast GPUs; Uncharted 3 has had less testing.
 
-[Detailed status](analysis/STATUS.md) · [Changelog](CHANGELOG.md) · [Releases](../../releases)
+[Detailed status](analysis/STATUS.md) · [Changelog](CHANGELOG.md) · [Releases](../../releases) · [Development Plan](DEVELOPMENT_PLAN.md)
 
 ## Requirements
 
