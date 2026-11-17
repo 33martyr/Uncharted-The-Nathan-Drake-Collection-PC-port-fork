@@ -7,6 +7,11 @@
     <img src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" alt="Get it on RecompLauncher">
   </a>
 </p>
+<p align="center">
+  <a href="https://github.com/fidalgojoao/Uncharted-The-Nathan-Drake-Collection-PC-port/releases/latest/download/Uncharted-windows.zip"><img src="https://img.shields.io/badge/%E2%AC%87%20DOWNLOAD-%20Windows-2ea44f?style=for-the-badge"></a>
+  &nbsp;
+  <a href="https://discord.com/invite/T545xWcpSw"><img src="https://img.shields.io/badge/JOIN-DISCORD-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
+</p>
 
 A free, non-commercial fan project that runs the PS4 *Uncharted: The Nathan Drake Collection* natively on Windows, using your own copy. Includes *Drake's Fortune*, *Among Thieves* and *Drake's Deception*, plus an experimental **Uncharted 2 & Uncharted 3 multiplayer restoration**.
 
