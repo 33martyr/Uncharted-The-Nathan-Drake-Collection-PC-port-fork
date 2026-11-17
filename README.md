@@ -8,7 +8,7 @@
   </a>
 </p>
 <p align="center">
-  <a href="https://github.com/fidalgojoao/Uncharted-The-Nathan-Drake-Collection-PC-port/releases/latest/download/Uncharted-windows.zip"><img src="https://img.shields.io/badge/%E2%AC%87%20DOWNLOAD-%20Windows-2ea44f?style=for-the-badge"></a>
+  <a href="../../releases/latest/download/Uncharted-windows.zip"><img src="https://img.shields.io/badge/%E2%AC%87%20DOWNLOAD-%20Windows-2ea44f?style=for-the-badge"></a>
   &nbsp;
   <a href="https://discord.com/invite/T545xWcpSw"><img src="https://img.shields.io/badge/JOIN-DISCORD-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
 </p>
@@ -38,7 +38,7 @@ Four CPU cores can hold 60 FPS in Drake's Fortune and Uncharted 3. On Ryzen 7000
 
 ## Install and update
 
-1. Download **Uncharted-windows.zip** from [Releases](../../releases) and extract it.
+1. Download **Uncharted-windows.zip** from [Releases](../../releases/latest/download/Uncharted-windows.zip) and extract it.
 2. Open **Uncharted Launcher.exe** and select your dumped `CUSA02344` folder containing `eboot.bin` and `sce_sys`.
 3. Add update **1.02** through **SETUP → step 2**, or place it beside the game as `CUSA02344-patch`.
 4. Choose a game and preset, then press **PLAY**. First launch compiles shaders, so loading and stutter are expected.
