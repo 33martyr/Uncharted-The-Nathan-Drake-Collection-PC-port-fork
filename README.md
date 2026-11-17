@@ -85,7 +85,7 @@ Comment on an issue and wait for a reply before starting. Submit one small fix p
 
 ## Credits and license
 
-- [**BilalReloaded**](https://github.com/bc160201983)): Created the [original PC port](https://github.com/bc160201983/Uncharted-The-Nathan-Drake-Collection-PC-port), runtime, game fixes and launcher. This fork's launcher converts his Python launcher to C++. Without his port, this project would not exist.
+- [**BilalReloaded**](https://github.com/bc160201983): Created the [original PC port](https://github.com/bc160201983/Uncharted-The-Nathan-Drake-Collection-PC-port), runtime, game fixes and launcher. This fork's launcher converts his Python launcher to C++. Without his port, this project would not exist.
 - **Runtime:** Based on [gow3_pc](https://github.com/FelipePrado0/gow3_pc), retaining its `GOW3_*` names, and the [shadPS4](https://github.com/shadps4-emu/shadPS4) video core.
 - **Temporal anti-aliasing:** Uses the games' motion-blur velocity pass for the camera, following [SuperMedo's Uncharted port](https://github.com/Supermedo/uncharted_pc) (GPL v2).
 - **NVIDIA DLSS / DLAA:** NVIDIA DLSS SDK **310.9.16** (`nvngx_dlss.dll`, NVIDIA license in `licenses/nvidia-dlss`), with a bridge adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) (MIT). NVIDIA, RTX and DLSS are NVIDIA Corporation trademarks.
