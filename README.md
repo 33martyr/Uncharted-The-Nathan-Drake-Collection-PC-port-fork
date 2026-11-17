@@ -58,8 +58,6 @@ Competitive, co-op and LAN party modes are restored through the **MULTIPLAYER** 
 
 Press **IMPORT** and follow the progress log. Conversion takes hours and resumes if the launcher is closed. Map and character conversions are still being completed; failed steps appear in the log.
 
-[Multiplayer source and research](u3mp/README.md)
-
 ## Legal status
 
 - **No game content distributed:** The repository and releases contain no game files, game code or game-derived data. The launcher and importer download none; they use local files only.
