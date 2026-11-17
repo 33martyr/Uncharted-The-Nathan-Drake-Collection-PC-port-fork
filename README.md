@@ -16,10 +16,9 @@ The games' x86-64 code runs directly on your PC, with a runtime for PS4 system l
 
 ## Status
 
-<b>Singleplayer</b>: All three games play, with working menus, game switching, saves, audio, cutscenes and controllers. Uncharted 2 and 3 have been played at up to 4K and above 60 FPS on fast GPUs; Uncharted 3 has had less testing.
+- **Singleplayer:** All three games play, with working menus, game switching, saves, audio, cutscenes and controllers. Uncharted 2 and 3 have been played at up to 4K and above 60 FPS on fast GPUs; Uncharted 3 has had less testing.
 [Detailed status](analysis/STATUS.md) · [Changelog](CHANGELOG.md) · [Releases](../../releases)
-
-<b>Multiplayer</b>: Still in Beta status. For Uncharted 3, we're just finalizing some broken gameplay mechanics and visual issues. For Uncharted 2, we're still a bit earlier, fixing the multiplayer menus as well. See the [Development Plan Progress](DEVELOPMENT_PLAN.md)!
+- **Multiplayer:** Still in Beta status. For Uncharted 3, we're just finalizing some broken gameplay mechanics and visual issues. For Uncharted 2, we're still a bit earlier, fixing the multiplayer menus as well. See the [Development Plan Progress](DEVELOPMENT_PLAN.md)!
 
 ## Requirements
 
@@ -46,15 +45,15 @@ Four CPU cores can hold 60 FPS in Drake's Fortune and Uncharted 3. On Ryzen 7000
 
 See [Controls and PC setup](tools/README-Windows.txt) for more help.
 
-## Uncharted 3 multiplayer (beta)
+## Uncharted 2 & Uncharted 3 multiplayer (beta)
 
 Competitive, co-op and LAN party modes are restored through the **MULTIPLAYER** tab. Import requires your own copies and:
 
 - **PS4 Collection 1.02:** CUSA02320 (EU) or CUSA02343 (US); their 1.02 executables are byte-identical.
 - **PS3 Uncharted 3 GOTY:** BCES01670, BCES01692, BCUS99086 or BCAS25014.
-- **PS3 data:** The game folder and RPCS3's `dev_hdd0/game` folder with update **1.19**, the game data install and DLC map packs.
-- **Executable:** Your decrypted 1.19 `EBOOT.elf`.
-- **Storage:** About **12 GB free**.
+- **PS3 data:** The game folder and RPCS3's `dev_hdd0/game` folder with Uncharted 2 GOTY update **1.10** and Uncharted 3 GOTY update **1.19**, the game data install and DLC map packs.
+- **Executable:** Your Uncharted 2 decrypted 1.10 `EBOOT.elf` and Uncharted 3 decrypted 1.19 `EBOOT.elf`.
+- **Storage:** About **14 GB free**.
 
 Press **IMPORT** and follow the progress log. Conversion takes hours and resumes if the launcher is closed. Map and character conversions are still being completed; failed steps appear in the log.
 
