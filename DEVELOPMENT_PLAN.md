@@ -4,8 +4,6 @@ Restore *Uncharted 2: Among Thieves* and *Uncharted 3: Drake’s Deception* mult
 
 [README](README.md) · [Contributing](CONTRIBUTING.md)
 
-Edit this file on GitHub and change `- [ ]` to `- [x]` as you complete each task.
-
 ## 1. Launcher
 
 - [x] Evolve the existing launcher to support this project’s multiplayer features and give it its own identity.
