@@ -22,8 +22,8 @@ The games' x86-64 code runs directly on your PC, with a runtime for PS4 system l
 ## Status
 
 - **Singleplayer:** All three games play, with working menus, game switching, saves, audio, cutscenes and controllers. Uncharted 2 and 3 have been played at up to 4K and above 60 FPS on fast GPUs; Uncharted 3 has had less testing.
-[Detailed status](analysis/STATUS.md) · [Changelog](CHANGELOG.md) · [Releases](../../releases)
-- **Multiplayer:** Still in testing, but you can try it out already! See the [**progress**](DEVELOPMENT_PLAN.md) for our long-term development plan! You can also join our [**Discord server**](https://discord.com/invite/T545xWcpSw) to play with the community or report any issues!
+[Detailed status](analysis/STATUS.md) · [Changelog](/misc/CHANGELOG.md) · [Releases](../../releases)
+- **Multiplayer:** Still in testing, but you can try it out already! See the [**progress**](/misc/DEVELOPMENT_PLAN.md) for our long-term development plan! You can also join our [**Discord server**](https://discord.com/invite/T545xWcpSw) to play with the community or report any issues!
 
 ## Requirements
 
