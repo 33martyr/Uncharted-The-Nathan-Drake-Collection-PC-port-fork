@@ -9,3 +9,6 @@
 *.bmp binary
 *.bin binary
 *.gz binary
+
+# Pages deploys the website; omit it from generated source archives.
+/misc/website/** export-ignore
