@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - ".github/workflows/deploy.yml"
-      - "misc/website/**"
+      - "assets/website/**"
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: misc/website
+          path: assets/website
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
